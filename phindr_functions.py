@@ -1,0 +1,804 @@
+"""
+Teophile Lemay, 2021
+
+This file contains functions needed to replicate the Phindr3D tool in python. 
+code is directly copied/inspired (only modified so that it works in python instead of matlab) from https://github.com/DWALab/Phindr3D .
+
+lets do this.
+
+repository structure:
+    executables:
+        installation .exe files
+    lib:
+        lots of files
+    manuals:
+        phindr3D manual .pdf
+        organoid contour segmentation manual .pdf
+    phindr3d-organoidCSApp:
+        files for organoid contour segmentation
+    ThirdParty/Clustering:
+        clustering algos.
+"""
+
+"""
+metadata format notes.upper():
+
+mData[ii, 0] is the same as fileNames.
+
+
+"""
+
+"""
+FORMAT TRANSLATION NOTES:
+
+rules of thumb from stackOverflow:
+    matlab array -> python numpy array
+
+    matlab cell array -> python list
+
+    matlab structure -> python dict
+
+VERY POSSIBLY, I SHOULD USE DICTIONARIES / ORDERED DICTIONARIESTO REPLACE THE "CELL" COMPONENTS USED TO HOLD METADATA.
+
+ALSO POSSIBLE THAT ALL THE THINGS CURRENTLY SET AS CLASSES (PARAM, PAR, C) SHOULD ALSO BE REPLACED WITH DICTIONARIES
+"""
+
+import numpy as np
+import scipy as sc
+import pandas as pd
+import time
+import matplotlib.pyplot as plt
+import re
+import os
+import tifffile as tf
+import skimage.io as io
+import cv2 as cv
+
+# start with lib folder:
+
+#classes that seem to be made/needed.
+class param_class:
+    """
+    this class holds the random parameters that seem to be passed along everywhere
+    """
+    def __init__(self):
+        self.numChannels = 3 #details still to come (usually 3 channel img)
+        self.randFieldID = None #dont know this one yet
+        self.fmt = None #dont know this one yet
+        self.randZForTraining = None #dont know yet either
+        self.getPixelBinCenters = None  #dont know yet
+        self.correctshade = 0
+        self.countBackground = None #bool, dont know what initial val should be.
+        self.numMevaVoxelBins = None #int, dont know default val yet
+
+class C_class:
+    def __init__(self):
+        self.minClsSize = 5
+        self.maxCls = 10
+        self.minCls = 1
+        self.S = []
+        self.pmin = 0
+        self.pmax = 0
+        self.pmed = 0
+
+class par_class:
+    def __init__(self):
+        self.training = None #unknown
+        self.test = None #unknown
+
+#intermediate translation functions (for when python doesnt seem to have a direct translation for a matlab function.)
+def regexpi(astr, expression, fmt='names'): 
+    """ 
+    named tokens in matlab regular expressions are equivalent to named groups in python regular expressions.
+    regexpi should use re.IGNORECASE bc matlab regexpi is case invariant
+
+    astr is the sstring to search in
+    expression is the set of groups to use for the search.
+    """
+    groups = re.compile(expression)
+    if fmt == 'names':
+        m = groups.search(astr, flags=re.IGNORECASE) # i think that this is an appropriate translation of regexpi
+        return m.groupdict()
+    elif fmt == 'tokenExtents':
+        m = groups.search(astr, flags=re.IGNORECASE)
+        spans = []
+        for group in groups:
+            if m.span(group) != (-1, -1):
+                spans.append(m.span)
+        return np.array(spans)
+    elif fmt == 'split':
+        return groups.split(astr)
+
+
+def iminfo(filename):
+    class info:
+        pass
+    info = info()
+    tif = tf.TiffFile(filename)
+    file = tif.pages[0]
+    metadata = {}
+    for tag in file.tags.values():
+        metadata[tag.name] = tag.value
+    info.Height = metadata['ImageLength']
+    info.Width = metadata['ImageWidth']
+    info.Format = 'tif'
+
+def im2col(array, shape, type='distinct'):
+    """im2col is a matlab builtin function"""
+    if type == 'distinct':
+        
+
+
+#functions that we seem to need (only start with calculation functions, no gui stuff yet).
+
+#   AssignTilestoBins.m
+def assignTilestoBins(tiledImage, binCenters):
+    """
+    assigns tiles to bins
+    """
+    numBins = binCenters.shape[0] 
+    numTiles, numPixelTile, numChannels = tiledImage.shape
+    tiledImageDis = np.zeros((numTiles, numPixelTile, numBins))
+    for iBins in range(numBins):
+        tmp = np.tile(binCenters[iBins, :], (numPixelTile, 1)) # i believe this is the correct translation.
+        tmp =  tiledImage - tmp #apply operation @minus element wise to tiledIMage and tmp; minus(A, B) = A - B
+        tmp = tmp**2
+        tiledImageDis[:, :, iBins] = sum(tmp, axis=2)
+    
+    I = np.argmin(tiledImageDis, axis=2) #seems like we want the indices of the minimums along axis=2
+    tiledImageDis = I
+    return tiledImageDis 
+
+#   clsIn.m
+def clsIn(data, beta=0.05, dis='euclidean'):
+    """
+    dis can be: "euclidean" OR "cosine" OR "hamming"
+    """
+    dis = dis.lower()
+    if data.size == 0: #check if data is empty array
+        print('Data is empty')
+        return None
+    C = C_class()
+    C.minClsSize = 5
+    C.maxCls = 10
+    C.minCls = 1
+    C.S = []
+    C.pmin = 0
+    C.pmax = 0
+    C.pmed = 0
+    sim = sc.spatial.distance.cdist(data, data, dis)
+    if dis == 'euclidean':
+        sim = -1*sim
+    elif (dis == 'cosine') or (sim == 'hamming'):
+        sim = 1 - sim
+    x_x = np.tril(np.ones((sim.shape[0], sim.shape[0]), -1, dtype=bool)) #lower triangular matrix True below the diagonal, false elsewhere.
+    C.pmed = np.median(sim[x_x], axis=1) #i think this is the right axis, but very unsure. Should be median along rows of 2d matrix since sim[x_x] is 2d matrix however, numpy rows and cols are different than in matlab.
+    C.pmin, C.pmax = preferenceRange(sim)
+    C.S = sim
+    return C
+
+#   computeClustering.m
+def computeClustering(data, numberClusters, type='AP'):
+    C = clsIn(data)
+    if type == 'AP':
+        clusterResult = apclusterK(C.S, numberClusters)
+    else:
+        clusterResult = np.arange(0, data.shape[0])
+    return clusterResult
+
+#   equalTrainingSamplePartition.m
+def equalTrainingSamplePartition(groups, samplesize):
+    par = par_class()
+    par.training = np.full((groups.size, 1), False)
+    par.test = np.full((groups.size, 1), False)
+    uniqueGroups = np.unique(groups[groups > 0])[0]
+    for iGroups in range(0, uniqueGroups.size):
+        ind = np.argwhere(groups == uniqueGroups[iGroups])
+        p = np.random.Generator.permutation(ind.size)
+        par.training[ind[p[:samplesize]], 0] = True #may or may not have to remove the ,0 at the end.
+        par.test[ind[p[samplesize:]], 0] = True
+    return par
+
+#   extractImageLevelTextureFeatures.m
+def extractImageLevelTextureFeatures(mData, allImageId, param, outputFileName, outputDir):
+    param.correctshade = 0
+    if param.countBackground:
+        totalBins = param.numMegaVoxelBins + 1
+    else:
+        totalBins = param.numMevaVoxelBins
+    uniqueImageID = np.unique(allImageId)[0]
+    resultIM = np.zeros((uniqueImageID.size, totalBins))
+    resultRaw = np.zeros((uniqueImageID.size, totalBins))
+    metaIndexTmp = [[[] for j in range(mData.shape[1])] for i in range(uniqueImageID.size)] #nested lists seems like a ok but not the cleanest way to do cell()
+    averageTime = 0
+    for iImages in range(0, uniqueImageID.size):
+        tImageAnal = time.time() #want to time this for some reason
+        ii = allImageId == uniqueImageID[iImages]
+        d, param.fmt = getImageInformation( mData[ii, 0] )
+        param = getTileInfo(d, param)
+        tmpInfoTable = mData[ii, 0:param.numchannels] #this type of indexing might not work.
+        superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpInfoTable, param.pixelBinCenters, param, ii)
+        megaVoxelProfile, fgMegaVoxel = getMegaVoxelProfile(superVoxelProfile, fgSuperVoxel, param)
+        resultIM[iImages, :], resultRaw[iImages] = getImageProfile(megaVoxelProfile, fgMegaVoxel, param)
+        tmp = mData[allImageId == uniqueImageID, :] #indexing may be wrong here too.
+        for k in range(mData.shape[1]):
+            metaIndexTmp[iImages][k] = tmp[1][k]
+        averageTime = averageTime + (time.time() - tImageAnal)
+        print('time remaining:', (uniqueImageID.size -iImages-1)*(averageTime/(iImages+1)), 's')  #time left update i guess
+    numRawMV = np.sum(resultRaw, axis=1)
+    dataHeaderIM = [[] for l in range(resultIM.shape[1])]
+    for i in range(0, resultIM.shape[1]):
+        dataHeaderIM[0][i] = f'MV {i}'
+    #want to remove ImageID if existis in Metadata
+    ii = param.metaDataHeader == 'ImageID'
+    param.metaDataHeader = param.metaDataHeader
+    #write outputs to file. pd.DataFrame would be VERY good for this part. have to figure out how to integrate properly
+    print('NEED TO PROPERLY FORMAT OUTPUT TO FILE HERE!!!!')
+
+    return resultIM, resultRaw, metaIndexTmp
+
+#   findClosestPoint2Line.m
+def findClosestPoint2Line(pts, v1, v2):
+    d = np.zeros((pts.shape[0], 1))
+    if pts.shape[1] == 2:
+        pts = np.array([pts, d])
+    for i in range(0, pts.shape[0]):
+        d[i] = getDistancePointFromLine(pts[i, :], v1, v2)
+    closestIndex = np.argmin(d)
+    return closestIndex
+
+#   getBestPreference.m
+def getBestPreference(x, y, pl=False):
+    """
+    % %getBestPreference Perform knee point detection
+    % to get the best clusters
+    % "Knee Point Detection in BIC for Detecting the Number of Clusters"
+    % Input:
+    %       x - X axis values
+    %       y - y axis values
+    %       pl - toggle plotting option
+    """
+    yp = 0 #i think that these are supposed to be indices, so i set to 0. if not, then it should be 1
+    xp = np.argwhere(y ==1)
+    if x.shape[0] != y.shape[0]:
+        print('Error')
+        return None
+    ys = y
+    pp = 3
+    maxabd = np.abs(y[2:] + y[0:-2] - (2*y[1:-1]))
+    ix = np.zeros((maxabd.shape[0], 1))
+    uMaxabd = np.unique(maxabd)[::-1].sort() #sort the array in descending order. This format should work
+    uMaxabd = uMaxabd[1:]
+    cnt = 0
+    for i in range(0, uMaxabd.size):
+        ii = np.argwhere(maxabd == uMaxabd[i])
+        ix[cnt:cnt+ii.size]  = ii[::-1].sort() #i dont think i need to put -1 after cnt + ii.size bc python omits last index already and I feel like matlab doesnt.
+        cnt += ii.size
+    n = x.size//2
+    ix = ix[0:n]
+    ix = ix + 1
+    mangle = np.zeros((n, 1))
+    for i in range(0, n):
+        if ix[i] > 1:
+            sl1 = np.divide( (y[ix[i]] - y[ix[i]-1]), (x[ix[i]] - x[ix[i]-1]) ) #pretty sure this is right. we should be doing proper matrix division
+            sl2 = np.divide( (y[ix[i]+1] - y[ix[i]]), (x[ix[i]+1] - x[ix[i]]) ) #same here.
+            mangle[i] = np.arctan( np.abs((sl1 + sl2)/(1 - (sl1*sl2))) )
+    maxMangle = np.max(mangle)
+    uI = mangle == maxMangle
+    im = np.min(ix[uI])
+    ii = im-1
+    xp = x[ii]
+    yp = ys[ii]
+    y = ys
+    #plotting here
+    if pl:
+        xCent = np.min(x) + (np.max(x) + np.min(x))/2
+        yCent = (y[-1] - y[0])/2
+        optText = f'Estimated Optimal Cluster -- {yp}'
+        plt.figure()
+        plt.plot(x, y, '-r', markercolor='r', lable='# Clusters')
+        plt.plot(xp, yp, '-bo', lable='Optimal Cluster')
+        plt.ylabel('Number of clusters')
+        plt.xlabel('Preference')
+        plt.text(xCent, yCent, optText)
+        plt.legend()
+    return yp, xp
+
+#   getDistancePointFromLine.m
+def getDistancePointFromLine(pt, v1, v2):
+    """called in findClosestPoint2Line"""
+    a = v1 - v2
+    b = pt - v2
+    d = np.linalg.norm(np.divide(np.cross(a, b), np.norm(a)))
+    return d
+
+#NOT FINISHED WITH THIS ONE YET.
+#   getExtractedMetadata.m
+def getExtractedMetadata(pth, astr, exprIM, opFilename):
+    """
+    function creates metadata from folder i think.
+
+    need better understanding of what actually is supposed to be in the metadata. maybe would be usefull to understand what gets parsed from metadata.
+    """
+    m = regexpi(str, exprIM, 'Names') #want name and text of each named token. 
+    #If str and expression are both character vectors or string scalars, 
+    # the output is a 1-by-n structure array, where n is the number of matches. 
+    # The structure field names correspond to the token names.
+
+    if len(m) == 0:
+        print('Regular expression mismatch')
+        return None
+
+#   getGroupIndices.m
+def getGroupIndices(textData, grpNames, Narg=None):
+    if Narg == None:
+        output = True
+    else:
+        output = False
+    if (len(textData) == 0) or (len(grpNames) == 0):
+        print('No data')
+        return None
+    numGrps = len(grpNames)
+    grps = np.zeros((len(textData), 1))
+    for i in range(numGrps):
+        p = grpNames[i] == textData[:, 0]
+        idx = np.nonzero(p)
+        if output:
+            print(f'NUmber of Points in {grpNames[i]} is {idx}')
+        if idx.size == 0:
+            pass
+        grps[idx, 0] = i
+    return grps
+    
+#NOT FINISHED WITH THIS ONE YET. HAS SOME DETAILS ABOUT METADATA CELL FORMAT THAT COULD BE USEFUL.
+#   getImage2Display.m
+def getImage2Display(mData, metaHeader, param, ImageID2View, imageID, chanInfo, stack2View, typeofView):
+    """
+    select image based on specific image ID (support for GUI program.)
+
+    % mData -Metadata cell array consisting of individual image information
+    %           in each row
+    %
+    % metaHeader - Associated metadata header
+    %
+    % param - Parameter file (Structure variable)
+    % 
+    % imageID2View - Image id selected to view
+    % 
+    % imageID - List of all image ID. Column vector
+    % 
+    % chanInfo - Structure variable having specific information about channels
+    % 
+    % stack2View - If viewing single slice then the stack number to view
+    % typeOfView - Montage, MIP. Any other choice defaults to single plane
+     """
+    #  get image from image Id, sort z stacks, norm things, show image projection based on user choices.
+    return image2Display
+
+#   getImageIDfromMetadata.m
+def getImageID(metadata, rootDir, exprIM):
+    """
+    gets unique image ID
+    """
+    uCol = metadata[:, 0] #first column is always one of the channels
+    astr = uCol[10, :] #just pick any row (what does this mean??)
+    astr = re.sub(rootDir, '', astr) #replace all text in astr that matches with rootDir with '' (nothing).
+    m1 = regexpi(astr, exprIM, 'names') #I think this returns a dictionary of {name:token text, ...}
+    ff = m1.keys() #list of fieldnames (dictionary keys) 
+    ff = [key.lower() for key in ff]#make lowercase for easier list comprehension.
+    try:
+        stackNuminRegexp = ff.index('stack')
+    except ValueError:
+        stackNuminRegexp = ff.index('stacks')
+    for i in range(uCol.size):
+        astr = re.sub(rootDir, '', uCol[i, :])
+        mm = regexpi(astr, exprIM, fmt='tokenExtents')
+        mm = mm[0, 0]
+        mm = mm[stackNuminRegexp, :]
+        uCol[i, :] = astr[0:mm[0]-1, mm[1]+1:] #may be wrong here.
+    uUCol = np.unique(uCol)[0]
+    imageIDcol = np.zeros((metadata.shape[0], 1))
+    cnt = 1
+    numUCol = uUCol.size
+    for i in range(0, numUCol):
+        ii = uCol == uUCol[i, :]
+        imageIDcol[ii, 0] = cnt
+        cnt += 1
+    return imageIDcol
+
+#   getImageInformation.m
+def getImageInformation( fileNames ):
+    """called in getPixelBinCenters"""
+    """called in extractImageLevelTextureFeatures"""
+    """
+    gets image dimensions from file names.
+    """
+    if len(fileNames) == 0:
+        print('Fi,e name empty')
+    d = np.ones(1, 3)
+    fmt = 'tif'
+    imFileName = np.unique(fileNames[:, 0])[0]  #could be wrong
+    imFileName = imFileName[0, 0] # i think we just want the name of the first file.
+    d[0, 2] = fileNames.shape[0]
+    info = iminfo(imFileName) #iminfo is matlab built-in.
+    d[0, 0] = info.Height
+    d[0, 1] = info.width
+    return d, fmt 
+
+#   getImageProfile.m
+def getImageProfile(megaVoxelProfile, fgMegaVoxel, param):
+    """called in extractImageLevelTextureFeatures"""
+    """
+    provides multi-parametric representation of image based on megavoxel categories
+    """
+    tmp1 = np.matmul(param.megaVoxelBincenters, param.megaVoxelBincenters, axis=1).H 
+    tmp2 = np.matmul(megaVoxelProfile[fgMegaVoxel,:],megaVoxelProfile[fgMegaVoxel,:], axis=1) - 2*np.matmul(megaVoxelProfile[fgMegaVoxel, :], param.megaVoxelBincenters.H)
+    a = tmp1 + tmp2
+    minDis = np.argmin(a, axis=1)
+    x = np.zeros((megaVoxelProfile.shape[0], 1))
+    x[fgMegaVoxel, 0] = minDis
+    numbins = param.numMegaVoxelBins
+    tmp = np.zeors((1, numbins+1))
+    for i in range(0, numbins+1):
+        tmp[:, i] = np.sum(x[fgMegaVoxel, 0] == (i-1))
+    imageProfile = tmp
+    if not param.countBackground:
+        rawProfile = imageProfile[:, 1:].copy()
+        imageProfile = imageProfile[:, 1:]
+    else:
+        rawProfile = imageProfile.copy(imageProfile)
+    imageProfile = imageProfile / np.sum(imageProfile, axis=1) #elementwise right array division.
+    return imageProfile, rawProfile
+
+#   getImageThreshold.m
+def getImageThreshold(IM):
+    maxBins = 256
+    freq, binEdges = np.histogram(IM.flatten(), bins=maxBins) 
+    binCenters = binEdges[:-1] + np.diff(binEdges)/2
+    meanIntensity = np.mean(IM.flatten())
+    numThresholdParam = len(freq)
+    binCenters -= meanIntensity
+    den1 = np.sqrt(np.matmul((binCenters**2), freq.H))
+    numAllPixels = np.sum(freq) #freq should hopefully be a 1D vector so summ of all elements should be right.
+    covarMat = np.zeros(numThresholdParam, 1)
+    for iThreshold in range(numThresholdParam):
+        numThreshPixels = np.sum(freq[binCenters > binCenters[iThreshold]])
+        den2 = np.sqrt( (((numAllPixels - numThreshPixels)*(numThreshPixels))/numAllPixels) )
+        covarMat[iThreshold, 0] = np.matmul(binCenters, (freq * (binCenters > binCenters[iThreshold])).H) / (den1*den2) #i hope this is the right mix of matrix multiplication and element-wise stuff.
+    imThreshold = np.argmax(covarMat) #index makes sense here.
+    imThreshold = binCenters[imThreshold] + meanIntensity
+    return imThreshold
+
+#   getImageThresholdValues.m
+def getImageThresholValues(mData, allImageId, param):
+    """
+    get image threshold values for dataset.  
+    """
+    intensityThresholdValues = np.full((5000, param.numChannels), np.nan)
+    startVal = 0
+    endVal = 0
+    for iImages in range(0, param.randFieldID.size):
+        ii = allImageId == param.randFieldID[iImages]
+        xx = mData[ii, 0]
+        if xx.size == 0:
+            print('SSS') #dont know about this one boss
+        d, param.fmt = getImageInformation(mData[ii, 0])
+        param = getTileInfo(d, param)
+        iTmp = getIndividualChannelThreshold(mData[ii, 0:param.numChannels], param, ii=ii)
+        intensityThresholdValues[startVal:endVal+iTmp.shape[0]-1, :] = iTmp
+        startVal += iTmp.shape[0]
+        endVal += iTmp.shape[0]
+    ii  = (intensityThresholdValues[:, 0] == np.nan) == False #ii is where not nan. Im not sure why they chose to write it like this tho.
+    param.intensityThresholdValues = intensityThresholdValues[ii, :]
+    return param
+
+#   getImageWithSVMVOverlay.m
+def getImageWithSVMVOverlay(IM, param, type):
+    """
+    I assume this means get image with superVoxel or megaVoxel overlay.
+
+    % param.tileX = 10;
+    % param.tileY = 10;
+    % param.megaVoxelTileX = 5;
+    % param.megaVoxelTileY = 5;
+    """
+    if type == 'SV':
+        IM[:param.tileX:, :, :] = 0.7
+        IM[:, :param.tileY:, :] = 0.7
+    else:
+        IM[:param.tileX*param.megaVoxelTileX:, :, :] = 1
+        IM[:, :param.tileY*param.megaVoxelTileY:, :] = 1
+    return IM
+ 
+#   getIndividualChannelThreshold.m
+def getIndividualChannelThreshold(filenames, param, ii=None):
+    """called in getImageThresholdValues""" 
+    
+    numberChannels = filenames.shape[1]
+    thresh = np.zeros(filenames.shape)
+    if ii == None:
+        ii = np.full(filenames.shape[0], True)
+    if param.intensityNormPerTreatment:
+        grpVal = np.unique(param.grpIndicesForIntensityNormalization[ii])[0] 
+    for iChannels in range(0, numberChannels):
+        for iImages in range(0, filenames.shape[0]):
+            IM = io.imread(filenames[iImages, iChannels]) #might need to add something to properly include .tif at the end of the filenames.
+            IM = IM[param.XOffsetStart:(-param.XOffsetEnd), param.YOffsetStart:(-param.YOffsetEnd)]
+            if param.intensityNormPerTreatement:
+                IM = rescaleIntensity(IM, param.lowerbound[grpVal, iChannels], param.upperbound[grpVal, iChannels])
+            else:
+                IM = rescaleIntensity(IM, param.lowerbound[:, iChannels], param.upperbound[:, iChannels])
+            thresh[iImages, iChannels] = getImageThreshold(IM.astype('float64')) #want double precision here. not sure if python can handle this since rounding error occurs at 1e-16, but will make float64 anyway
+    #they choose to clear IM here, but if its getting overwritten every for loop, its probably fine.
+    return thresh
+
+#   getIntensityFeatures.m
+def getIntesityFeatures(metadataFileRaw, metadataFilenameLabel, uImageID, param): #added param to function parameters because it is somehow called here.
+    param.channelDiscarded = [] #empty matrix -> empty list should be fine.
+    metadataLabel, discard1, discard2, imageIDLabel = getPlateInfoFromMetadatafile(metadataFilenameLabel, param)
+    metadataRaw, headerRaw, discard1, imageIDRaw = getPlateInfoFromMetadatafile(metadataFileRaw, param)
+    stkCol = headerRaw == 'Stack'
+    allFeatures = np.full((uImageID.size, 4), np.nan)
+    for i in range(0, uImageID.size):
+        ii = imageIDRaw = uImageID[i]
+        if np.sum(ii) == 0:
+            continue
+        stk = [int(stackstr) for stackstr in metadataRaw[ii, stkCol]] #these values are presumably str values in some array container. want to convert each eeach string to int.
+        stk2pick = (np.max(stk) - np.min(stk))//2
+        jj = stk == np.min(stk) + stk2pick
+        channelCol = metadataRaw[ii, 0:3]
+        channelCol = channelCol[jj, :]
+        #label image
+        kk = imageIDLabel == uImageID[i]
+        labelImage = metadataLabel[kk, 0]
+        labelImage = io.imread(labelImage)
+        labelImage = labelImage > 0
+        labelImage = cv.erode(labelImage, np.ones((20,20)))
+        labelImageEroded = cv.erode(labelImage, np.ones((20,20))) #erode twice
+        #in their code, There is commented out imshow() stuff to show the eroded images here.
+
+        for k in range(0,3):
+            rawImage = io.imread(channelCol[0, k]).astype(np.float64) #remember it is '.Tiff' file.
+            im1 = labelImageEroded * rawImage #elementwise multiplication is correct here
+            int1 = np.sum(im1) / np.sum(labelImageEroded)
+            im1 = (labelImage - labelImageEroded) * rawImage #elementwise multiplication is correct
+            l = labelImage - labelImageEroded
+            int2 = np.sum(im1)/np.sum(l)
+            allFeatures[i, k] = int2/int1
+        allFeatures[i, 4] = np.max(stk) - np.min(stk)
+        #get MIP
+    allFeaturesInt = np.full((uImageID.size, 3), np.nan)
+    for i in range(0, uImageID.size):
+        ii = imageIDRaw == uImageID[i]
+        if np.sum(ii) == 0:
+            continue
+        stk = [int(stackstr) for stackstr in metadataRaw[ii, stkCol]]
+        stk2pick = (np.max(stk) - np.min(stk))//2
+        jj = stk == (np.min(stk)+stk2pick)
+        channelCol = metadataRaw[ii, 1:3]
+        #label image
+        kk = imageIDLabel == uImageID[i]
+        labelImage = metadataLabel[kk, 0]
+        labelImage = io.imread(labelImage)
+        labelImage = labelImage > 0
+        #commented code: eroded image
+        for k in range(0, 3):
+            rawImage = getMIPImage(channelCol[:, k])
+            im1 = labelImage * rawImage
+            allFeaturesInt[i, k] = np.sum(im1) / np.sum(labelImage)
+    allHeader = ['Ch1Int', 'Ch2Int', 'Ch3Int', 'Ch1Ratio', 'Ch2Ratio', 'Ch3Ratio', 'NumPlanes']
+    allData = [allFeaturesInt, allFeatures]
+    return allHeader, allData
+
+#   getMIPImage.m
+def getMIPImage(imfiles):
+    """called in getIntensityFeatures"""
+    """
+    getMIPImage Creates maximum intensity projected images for a set of image
+    files in imfiles
+    """
+    format = regexpi(imfiles[0, 0], r'\.', fmt='split')
+    format = format[0, -1]
+    numzPlanes = imfiles.shape[0]
+    info = iminfo(imfiles[0,0], format)
+    imMIP = np.ones((info.Height, info.Width)) * (-1) * np.inf #why not just initialize with 0, idk, but this works
+    for i in range(0, numzPlanes):
+        tmp = io.imread(imfiles[i, 0], format).astype(np.float64)
+        tmp = sc.signal.medfilt2d(tmp, kernel_size=3)
+        imMIP = np.maximum(imMIP, tmp)
+    return imMIP
+
+#   getMegaVoxelBinCenters.m
+def getMegaVoxelBinCenters(mData, allImageId, param):
+    """
+    compute bincenters for megaVoxels
+
+    % mData  - Metadata
+    % allImageID - Image IDs of each image stack
+    % param - All parameters
+    % Output
+    % param - Appended parameters
+    """
+    MegaVoxelsforTraining = []
+    totalIterations = param.randFieldID.size+1
+    for iImages in range(0, param.randFieldID.size):
+        ii = allImageId == param.randFieldID[iImages]
+        d, param.fmt = getImageInformation(mData[ii, 0])
+        param = getTileInfo(d, param)
+        tmpInfoTable = mData[ii, 0:param.numChannels]
+        superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpInfoTable, param.pixelBinCenters, param, ii)
+        megaVoxelProfile, fgMegaVoxel = getMegaVoxelProfile(superVoxelProfile, fgSuperVoxel, param)
+        megaVoxelforTraining = [MegaVoxelsforTraining, megaVoxelProfile[fgMegaVoxel, :]] # i dont think this list creation process is right. matlab format: [megaVoxelforTraining;megaVoxelProfile(fgMegaVoxel,:)
+        param.megaVoxelBincenters = getPixelBins(megaVoxelforTraining, param.numMegaVoxelBins)
+    return param
+
+#   getMegaVoxelProfile.m
+def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param):
+    """called in extractImageLevelTextureFeatures"""
+    """called in getMegaVoxelBinCenters"""
+    a =  np.tensordot(param.supervoxelBincenters, param.supervoxelBincenters, axis=1).H + np.tensordot(tileProfile[fgSuperVoxel, :], tileProfile[fgSuperVoxel, :], axis=1) + (-2)*np.matmul(tileProfile[fgSuperVoxel, :], param.supervoxelBincenters.H)  #elementwise summation 
+    minDis = np.argmin(a, axis=2)
+    x = np.zeros((tileProfile.shape[0], 1))
+    x[fgSuperVoxel, 0] = minDis
+    x = np.reshape(x, (param.croppedX/param.tileX, param.croppedY/param.tileY, param.croppedZ/param.tileZ))
+    if param.showImage:
+        plt.figure()
+        plt.imshow(x[:, :, 2], 'gray')
+        plt.show()
+    x = np.concatenate(np.zeros((param.superVoxelXAddStart, x.shape[1], x.shape[2])), x, np.zeros((param.superVoxelXAddEnd, x.shape[1], x.shape[2])), axis=0)
+    x = np.concatenate(np.zeros((x.shape[0], param.superVoxelYAddStart, x.shape[2])), x, np.zeros((x.shape[0], param.superVoxelYAddEnd, x.shape[2])), axis=1)
+    x = np.concatenate(np.zeros((x.shape[0], x.shape[1], param.superVoxelZAddStart)), x, np.zeros((x.shape[0], x.shape[1], param.superVoxelZAddEnd)), axis=2)
+    x = x.astype(np.uint8)
+    param.numMegaVoxelsXY = x.shape[0] * x.shape[2] / (np.matmul(param.megaVoxelTileY, param.megaVoxelTileX))
+    param.numMegaVoxels = (param.numMegaVoxelsXY*x.shape[2])/param.megaVoxelTileZ
+    sliceCounter = 0
+    tmp = []
+    startVal = 0
+    endVal = param.numMegaVoxelsXY
+    try:
+         megaVoxelProfile = np.zeros((param.numMegaVoxels, param.numSuperVoxelBins+1))
+    except Exceptions:
+        print('@@')
+    fgMegaVoxel = np.zeros((param.numMegaVoxels, 1))
+    for iSuperVoxelImagesZ in range(0, x.shape[2]):
+        sliceCounter += 1
+        tmp1 = 
+
+
+
+    return megaVoxelProfile, fgMegaVoxel
+
+
+#   getPixelBinCenters.m
+def getPixelBinCenters(mData, allImageId, param):
+    """
+    compute bincenters for pixels
+
+    allImageId is image ids of each image stack
+    mData is metadata.
+    param should be some parameter class object.
+    """
+    pixelsForTraining = np.zeros(300000, param.numChanels)
+    startVal = 0
+    endVal = 0
+    #they have waitbar (for gui, gives you progress update)
+    # totalIterations = param.randFieldID.size + 1 #number of elements in array randFieldID +1 #only used for the waitbar
+    for iImages in range(param.randFieldID.size):
+        ii = allImageId == param.randFieldID[iImages] 
+        d, param.fmt = getImageInformation( mData(ii, 0) )
+        param = getTileInfo(d, param)
+        param.randZForTraining = np.sum(ii)//2 #True = 1, False = 0; so we have number of true in ii.
+        tmpInfoTable = mData
+        iTmp = getTrainingPixels(tmpInfoTable, param, ii)
+        pixelsForTraining[startVal:endVal+iTmp.shape[0]-1, :] = iTmp
+        startVal += iTmp.shape[0]
+        endVal += iTmp.shape[0]
+    pixelsForTraining = pixelsForTraining[np.sum(pixelsForTraining, axis=1) > 0, :]
+    param.pixelBinCenters = getPixelBins(pixelsForTraining, param.numVoxelBins)
+
+
+
+
+
+
+
+#need to find these ones
+def preferenceRange(sim):
+    """called in clsIn"""
+    return pmin, pmax
+
+def getTileInfo(d, param):
+    """called in getPixelBinCenters"""
+    """called in extractImageLevelTextureFeatures"""
+    """called in getImageThresholdValues"""
+    return param
+
+def parseMetaDataFile(fileName):
+    """called in getPixelBinCenters"""
+    return mData, metaImageID, metaHeader, chanInfo
+
+def getTrainingPixels(tmpInfoTable, param, ii):
+    """called in getPixelBinCenters"""
+    return iTmp
+
+def getPixelBins(pixelsForTraining, numVoxelBins):
+    """called in getPixelBinCenters"""
+    """called in getMegaVoxelBinCenters"""
+    return pixelBinCenters
+
+def apclusterK(S, numberClusters):
+    """called in computeClustering"""
+    """pretty sure the function referenced is in the third party/clustering folder"""
+    return clusterResult
+
+def getTileProfiles(tmpInfoTable, pixelBinCenters, param, ii):
+    """called in extractImageLevelTextureFeatures"""
+    """called in getMegaVoxelBinCenters"""
+
+    return superVoxelProfile, fgSuperVoxel
+
+def rescaleIntensity(IM, lowerbound, upperbound):
+    """called in getIndividualChannelThreshold"""
+    return IM
+
+def getPlateInfoFromMetadatafile(metadataFilenameLabel, param):
+    """called in getIntensityFeatures"""
+    return metadataLabel, unknown, unknown, imageIDLabel
+
+
+
+
+
+
+
+
+
+#gui function to fill in later:
+
+#   PhinDR3D_Main.m
+#    seems to be mostly gui stuff (lots of callbacks (function that executes on predefined action), calls to other functions to set things up)
+def PhinDR3D_Main():
+    return None
+
+#   PhindrViewer.m
+#     again, seems to be mostly gui stuff, img viewing i think. some functions to save cluster results to file.
+def PhindrViewer():
+    return None
+
+#   colorpicker.m
+def colorpicker():
+    #gui stuff, I am pretty sure this lets the user pick what color is used to display each channel.
+    #go back to later as needed.
+    return None
+
+#   findjobj.m
+#      very intense gui stuff. apparently matlab gui is built on java, this matlab function does works through handles, other gui things 
+#      straight up gui building, user interactions, etc.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
