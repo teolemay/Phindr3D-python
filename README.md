@@ -1,2 +1,4 @@
 # Phindr3D-python
-Python translation of Phindr3D
+Translation of Phindr3D from matlab to python
+
+Work in progress.
