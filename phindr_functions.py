@@ -109,7 +109,6 @@ def regexpi(astr, expression, fmt='names'):
     elif fmt == 'split':
         return groups.split(astr)
 
-
 def iminfo(filename):
     class info:
         pass
@@ -123,10 +122,36 @@ def iminfo(filename):
     info.Width = metadata['ImageWidth']
     info.Format = 'tif'
 
-def im2col(array, shape, type='distinct'):
-    """im2col is a matlab builtin function"""
+def im2col(arr, shape, type='distinct'): # this implementation inspired from https://stackoverflow.com/questions/25449279/efficient-implementation-of-im2col-and-col2im
+    """
+    im2col is a matlab builtin function
+    param arr: 2D array 
+    param shape: tuple, kernel shape (rows, cols)
+    param type: kernel motion type (distinct or sliding kernels)
+    """
     if type == 'distinct':
-        
+        nrows = shape[0]
+        ncols = shape[1]
+        nele = nrows*ncols
+        row_ext = arr.shape[0] % nrows #need to padd array if kernel doesnt fit nicely into array shape
+        col_ext = arr.shape[1] % ncols
+        A1 = np.zeros((arr.shape[0]+row_ext, arr.shape[1]+col_ext))
+        A1[:arr.shape[0], :arr.shape[1]] = arr
+
+        t1 = np.reshape(A1, (nrows, A1.shape[0]/nrows, -1))
+        t1tilde = np.transpose(t1.copy(), (0, 2, 1))
+        t2 = np.reshape(t1tilde, (t1.shape[0]*t1.shape[2], -1))
+        t3 = np.transpose(np.reshape(t2, (nele, t2.shape[0]/nele, -1)), (0, 2, 1))
+        return np.reshape(t3, (nele, -1))
+
+def kmeans(x, *args):
+    """called in getpixelBins"""
+    #matlab has a built-in k means clustering function. this is a placeholder until I choose how to write it in python.
+    # bin centers is: "the k cluster centroid locations in the k-by-p matrix C." as written at https://www.mathworks.com/help/stats/kmeans.html#bues2hs
+    return something_discarded, binCenters
+
+
+
 
 
 #functions that we seem to need (only start with calculation functions, no gui stuff yet).
@@ -657,17 +682,69 @@ def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param):
     endVal = param.numMegaVoxelsXY
     try:
          megaVoxelProfile = np.zeros((param.numMegaVoxels, param.numSuperVoxelBins+1))
-    except Exceptions:
-        print('@@')
+    except Exception as e:
+        print('e')
     fgMegaVoxel = np.zeros((param.numMegaVoxels, 1))
     for iSuperVoxelImagesZ in range(0, x.shape[2]):
         sliceCounter += 1
-        tmp1 = 
-
-
-
+        tmp1 = im2col(x[:, :, iSuperVoxelImagesZ], (param.megaVoxelTileX, param.megaVoxelTileY), type='distinct')
+        tmp = [tmp, tmp1]
+        if sliceCounter == param.megaVoxelTileZ:
+            for i in range(0, param.numSuperVoxelBins+1):
+                megaVoxelProfile[startVal:endVal, i] = np.sum(tmp == i-1, axis=1) #value of zeros means background supervoxel
+            fgMegaVoxel[startVal:endVal, 0] = (np.sum(tmp!= 0, axis=1)/tmp.shape[1]) >= param.megaVoxelThresholdTuningFactor
+            sliceCounter = 0
+            tmp = []
+            startVal += param.numMegaVoxelsXY
+            endVal += param.numMegaVoxelsXY
+    if not param.countBackground:
+        megaVoxelProfile = megaVoxelProfile[:, 1:]
+    megaVoxelProfile = megaVoxelProfile / np.sum(megaVoxelProfile, axis=2) #hopefully this works, they ask for elementwise, but the arrays seem to have different shapes.
+    fgMegaVoxel = fgMegaVoxel.astype(bool) 
     return megaVoxelProfile, fgMegaVoxel
 
+#   getMerged3DImage.m
+def getMerged3DImage(filenames, colors, boundValues, thresholdValues):
+    #this function makes a distinction about whether filenames is a matlab cell array or not.
+    #hopefully, I can standardize things down the line so that this distinction is not needed.
+    #here, it looks like cell format filenames means list/array of file names, non-cell format means filenames is actually already multichannel image
+    
+    #here, I have a poor workaround, but hopefully it holds for now. Will need to come back to this to FIX LATER
+    if (filenames.shape[1] == colors.shape[0]): #hopefully neitther of the shape matches can happen coincidentally.
+        numChannels = filenames.shape[1]
+        info = iminfo(filenames[0, 0])
+        imWidth = info.Width
+        imHeight = info.Height
+        cellFile = True #unclear if this is necessary
+    elif (filenames.shape[2] == colors.shape[1]):
+        numChannels = filenames.shape[2]
+        imWidth = filenames.shape[1]
+        imHeight = filenames.shape[0]
+        cellFile = False
+    else: #i no colors and shape matches.
+        im3D = np.ones((1000, 1000, 3))
+        return im3D
+    im3D = np.zeros((imHeight, imWidth, 3))
+    #want to give image pseudocolor for each channel
+    for jChannel in range(0, numChannels):
+        if cellFile:
+            im = io.imread(filenames[0, jChannel]).astype(np.float64)
+        else:
+            im = filenames[:, :, jChannel]
+        maxMin = np.abs(boundValues[jChannel, 1]) - boundValues[jChannel, 0]
+        im = (im - boundValues[jChannel, 0])/maxMin
+        im[im>1] = 1
+        im[im<0] = 0
+        im = im * (im >= thresholdValues[jChannel]) #not sure how this works because im has already been converted to a binary array it seems
+        im3D[:, :, 0] = im3D[:, :, 0] + colors[jChannel, 0]*im
+        im3D[:, :, 1] = im3D[:, :, 1] + colors[jChannel, 1]*im
+        im3D[:, :, 2] = im3D[:, :, 2] + colors[jChannel, 2]*im
+    for i in range(0, 3):
+        maxI = np.max(np.max(im3D[:, :, i]))
+        minI = np.min(np.min(im3D[:, :, i]))
+        if (maxI - minI) > 0:
+            im3D[:, :, i] = (im3D[:, :, i] - minI)/(maxI - minI)
+    return im3D
 
 #   getPixelBinCenters.m
 def getPixelBinCenters(mData, allImageId, param):
@@ -695,8 +772,38 @@ def getPixelBinCenters(mData, allImageId, param):
         endVal += iTmp.shape[0]
     pixelsForTraining = pixelsForTraining[np.sum(pixelsForTraining, axis=1) > 0, :]
     param.pixelBinCenters = getPixelBins(pixelsForTraining, param.numVoxelBins)
+    return param
 
+#   getPixelBins.m
+def getPixelBins(x, numBins):
+    """
+    %getPixelBins Get pixel centers from training images
+    % For each voxel, assign categories
 
+    % Inputs:
+    % x - m x n (m is the number of observations and n could be number of channels or category fractions)
+    % numBins - Number of categories
+
+    % Outputs
+    % binCenters - (numBins+1) x n (The first centroid are zeros- indicating background)
+
+    % numBins = param.numVoxelBins;
+    % Use kmeans clustering to get  (looks like it is using kmeans++ algorithm)
+    """
+    #matlab has a built-in k means clustering algorithm. Need to decide whether to use something like sklearn kmeans, or write own k means algo (might be slower)
+    m = x.shape[0]
+    if m > 50000:
+        samSize = 50000
+    else:
+        samSize = m
+    if m > samSize:
+        numRandRpt = 10
+        binCenters = np.zeros((numBins, x.shape[1], numRandRpt))
+        sumD = np.zeros((numRandRpt, 1))
+        for iRandCycle in range(0, numRandRpt):
+            discard, binCenters[:, :, iRandCycle] = kmeans(x[np.random.rand(m, samSize)], #OTHER PARAMETERS)
+
+    return binCenters
 
 
 
