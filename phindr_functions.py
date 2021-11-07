@@ -63,14 +63,38 @@ class param_class:
     this class holds the random parameters that seem to be passed along everywhere
     """
     def __init__(self):
-        self.numChannels = 3 #details still to come (usually 3 channel img)
-        self.randFieldID = None #dont know this one yet
-        self.fmt = None #dont know this one yet
-        self.randZForTraining = None #dont know yet either
-        self.getPixelBinCenters = None  #dont know yet
-        self.correctshade = 0
-        self.countBackground = None #bool, dont know what initial val should be.
-        self.numMevaVoxelBins = None #int, dont know default val yet
+        self.tileX = 10
+        self.tileY = 10
+        self.tileZ = 3
+        self.intensityThresholdTuningFactor = .5
+        self.numVoxelBins = 20
+        self.numSuperVoxelBins = 15
+        self.numMegaVoxelBins = 40
+        self.minQuantileScaling = .5
+        self.maxQuantileScaling = .5
+        self.randTrainingSuperVoxel = 10000
+        self.superVoxelThresholdTuningFactor = .5
+        self.megaVoxelTileX = 5
+        self.megaVoxelTileY = 5
+        self.megaVoxelTileZ = 2
+        self.countBackground = false
+        self.megaVoxelThresholdTuningFactor = .5
+        self.pixelsPerImage = 200
+        self.randTrainingPerTreatment = 1
+        self.randTrainingFields = 5
+        self.showImage = 0
+        self.startZPlane = 1
+        self.endZPlane = 500
+        self.numRemoveZStart = 1
+        self.numRemoveZEnd = 1
+        self.computeTAS = 0
+        self.showImage = 0
+        self.trainingPerColumn = False
+        self.intensityNormPerTreatment = False
+        self.treatmentColNameForNormalization = ''
+        self.trainingColforImageCategories = ''
+        self.superVoxelPerField = self.randTrainingSuperVoxel//self.randTrainingFields
+    
 
 class C_class:
     def __init__(self):
@@ -922,23 +946,23 @@ def getTileInfo(dimSize, param):
     param.origZ = dimSize[2]
 
     if xOffset % 2 == 0:
-        param.XOffsetStart = xOffset/2 + 1
-        param.XOffsetEnd = xOffset/2
+        param.xOffsetStart = xOffset/2 + 1
+        param.xOffsetEnd = xOffset/2
     else:
-        param.XOffsetStart = xOffset//2 + 1
-        param.XOffsetEnd = -(-xOffset//2 )  #ceiling division is the same as upside-down floor division. 
+        param.xOffsetStart = xOffset//2 + 1
+        param.xOffsetEnd = -(-xOffset//2 )  #ceiling division is the same as upside-down floor division. 
     if yOffset % 2 == 0:
-        param.YOffsetStart = yOffset/2 + 1
-        param.YOffsetEnd = yOffset/2
+        param.yOffsetStart = yOffset/2 + 1
+        param.yOffsetEnd = yOffset/2
     else:
-        param.YOffsetStart = yOffset//2 + 1
-        param.YOffsetEnd = -(-yOffset//2 )     
+        param.yOffsetStart = yOffset//2 + 1
+        param.yOffsetEnd = -(-yOffset//2 )     
     if zOffset % 2 == 0:
-        param.ZOffsetStart = zOffset/2 + 1
-        param.ZOffsetEnd = zOffset/2
+        param.zOffsetStart = zOffset/2 + 1
+        param.zOffsetEnd = zOffset/2
     else:
-        param.ZOffsetStart = zOffset//2 + 1
-        param.ZOffsetEnd = -(-zOffset//2 )    
+        param.zOffsetStart = zOffset//2 + 1
+        param.zOffsetEnd = -(-zOffset//2 )    
 
     if superVoxelXOffset % 2 == 0:
         param.superVoxelXOffsetStart = superVoxelXOffset/2 + 1
@@ -1032,7 +1056,158 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
     % should be higher than the respective thrshold
     % TASScores: If TAS score is sleected
     """
-    return superVoxelProfile, fgSuperVoxel
+    numTilesXY = (param.cropedX*param.croppedY)/(param.tileX*param.tileY) #why not just use param.numSuperVoxelsXY, I Have not idea. the calculation is the exact same.
+    filenames = filenames[param.zOffsetStart:-param.zOffsetEnd, :] #keep z stacks that are divisible by stak count
+    sliceCounter=0
+    startVal=0
+    endVal=numTilesXY
+
+    startCol= 0
+    endCol = param.tileX*param.tileY
+    if param.intensitynormPerTreatment:
+        grpVal = np.unique(param.grpIndicesForIntensityNormalization[ii])
+    superVoxelProfile = np.zeros((param.numSuperVoxels, param.numVoxelBins+1))
+    fgSuperVoxel = np.zeros((param.numSuperVoxels, 1))
+    cnt = 1
+    if param.computeTAS:
+        categoricalImage = np.zeros((param.croppedX, param.croppedY, param.croppedZ))
+    #loop over file names and extract super voxels
+    tmpData = np.zeros((numTilesXY, param.tileX*param.tileY*param.tileZ))
+    for iImages in range(0, filenames.shape[0]):
+        sliceCounter += 1
+        croppedIM = np.zeros((param.origX, param.origY, param.numChannels)) #just one slice in all 3 channels
+        for jChannels in range(0, param.numChannels):
+            if param.intensityNormPerTreatment:
+                croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[iImages, jChannels], param.fmt), param.lowerbound[grpVal, jChannels], param.upperbound[grpVal, jChannels])
+            else:
+                croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[iImages, jChannels], param.fmt), param.lowerbound[:, jChannels], param.upperbound[:, jChannels])
+        croppedIM = croppedIM[param.xOffsetStart:-param.xOffsetEnd, param.yOffsetStart:-param.xOffsetEnd, :] #z portio of the offset has already been done by not loading the wrong slices
+        x = np.reshape(croppedIM, (param.croppedX*param.croppedY, param.numChannels))
+        fg = np.sum(x > param.intensityThreshold, axis=1) >= param.numChannels/3 #a fancy way to say greater than 1?
+        pixelCategory = np.argmin((param.pixelBinCenterDifferences + np.tensordot(x[fg,:], x[fg,:], axis=1)) - 2*(np.multiply(x[fg,:], pixelBinCenters.H)), axis=1)
+        x = np.zeros((param.croppedX, param.croppedY, 1), dtype='uint8')
+        x[fg, :] = pixelCategory
+        if param.computeTAS:
+            categoricalImage[:, :, iImages] = np.reshape(x, param.croppedX, param.croppedY)
+        del fg, croppedIM, pixelCategory #not 100 on why to delete al here since things would just be overwritten anyway, but why not right, also, some of the variables to clear where already commented out so I removed them from the list
+        if sliceCounter == param.tileZ:
+            fgSuperVoxel[startVal:endVal, 0] = (np.sum(tmpData != 0, axis=1)/tmpData.shape[1]) >= param.superVoxelThresholdTuningFactor
+            for i in range(0, param.numVoxelBins+1):
+                superVoxelProfile[startVal:endVal, i] = np.sum(tmpData == i-1, axis=1)
+            sliceCounter = 0
+            startVal += numTilesXY
+            endVal += numTilesXY
+            startCol = 0
+            endCol = param.tileX*param.tileY
+            tmpData = np.zeros((numTilesXY, param.tileX*param.tileY*param.tileZ))
+        else:
+            tmpData[:, startCol:endCol] = im2col(np.reshape(x, (param.croppedX, param.croppedY)), (param.tileX, param.tileY), type='distinct')
+            startCol += (param.tileX*param.tileY)
+            endCol += (param.tileX*param.tileY)
+        cnt += 1
+    if not param.countBackground:
+        superVoxelProfile = superVoxelProfile[:, 1:]
+    superVoxelProfile = superVoxelProfile / np.sum(superVoxelProfile, axis=1)
+    superVoxelProfile[superVoxelProfile == np.nan] = 0
+    if param.computeTAS:
+        TASScores = getCategoricalTASScores[categoricalImage, param.numVoxelBins]
+    else:
+        TASScores = np.zeros((1, 27*param.numVoxelBins))
+    fgSuperVoxel = fgSuperVoxel.astype(bool)
+    return superVoxelProfile, fgSuperVoxel, TASScores #TASScores is optional
+
+#   getTrainingfields.m
+def getTrainingFields(metaInfo, param, allImageId, treatmentColumn):
+    """called in getScalingFactorforImages"""
+    randomImage = False
+    if len(allImageId) == 0:
+        randomImage = False
+    if treatmentColumn.size == 0:
+        randomImage = True
+    uniqueImageID = np.unique(allImageId)
+    if randomImage:
+        randFieldID = uniqueImageID[np.random.Generator.integers(low=0, high=uniqueImageID.size, size=param.randTrainingFields)]
+    else:
+        if not np.array_equal(treatmentColumn, treatmentColumn.astype(bool)): #if not logical array
+            treatmentColumn = param.metaDataHeader == treatmentColumn #want this to be case insensitive comparison of strings
+        uTreat = np.unique(metaInfo[:, treatmentColumn])
+        param.randTrainingPerTreatment = -(-param.randTrainingFields//uTreat.size) #ceiling division
+        randFieldID = np.zeros((param.randTrainingPerTreatment, uTreat.size))
+        for i in range(0, uTreat.size):
+            ii = metaInfo[:, treatmentColumn] == uTreat[i, :]
+            tmp = np.unique(allImageId[ii])
+            randFieldID[:, i] = tmp[np.random.Generator.integers(low=0, high=tmp.size, size=param.randTrainingPerTreatment)]
+    randFieldID = randFieldID.ravel()
+    treatmentValues = []
+    for i in range(0, randFieldID.size):
+        if not randomImage:
+            ii = metaInfo[allImageID == randFieldID[i], treatmentColumn]
+            treatmentValues.append(ii[0,:])
+        else:
+            treatmentValues.append('RR')
+    return randFieldID, treatmentValues
+
+#   getTrainingPixels.m
+def getTrainingPixels(filenames, param, ii):
+    """called in getPixelBinCenters"""
+    filenames = filenames[np.random.Generator.integers(low=0, high=filenames.shape[0], size=param.randZForTraining), :]
+    trPixels = np.zeros((param.pixelsPerImage*param.randZForTraining, param.numChannels))
+    startVal = 0
+    if param.intensityNormPerTreatment:
+        grpVal = np.unique(param.grpIndicesForIntensityNormalization[ii])
+    filenames = filenames[0:(filenames.shape[0]//2), :]
+    for iImages in range(0, filenames.shape[0]):
+        croppedIM = np.zeros((param.origX, param.origY, param.numChannels))
+        for jChannels in range(0, param.numChannels):
+            if param.intensityNormPerTreatment:
+                croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[iImages, jChannels], param.fmt), param.lowerbound[grpVal, jChannels], param.upperbound[grpVal, jChannels])
+            else:
+                croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[iImages, jChannels], param.fmt), param.lowerbound[:, jChannels], param.upperbound[:, jChannels])
+        croppedIM = croppedIM[param.xOffsetStart:-param.xOffsetEnd, param.yOffsetStart:-param.yOffsetEnd, :]
+        croppedIM = np.reshape(croppedIM, (param.croppedX*param.croppedY, param.numChannels))
+        croppedIM = croppedIM[np.sum(croppedIM > param.intensityThreshold, axis=2) >= param.numChannels/3, :]
+        croppedIM = selectPixelsbyweights(croppedIM)
+        if croppedIM.shape[0] >= param.pixelsPerImage:
+            trPixels[startVal:startVal + param.pixelsPerImage-1, :] = croppedIM[np.random.Generator.integers(low=0, high=croppedIM.shape[0], size=param.pizelsPerImage), :]
+            startVal += param.pixelsPerImage
+        else:
+            trPixels[startVal:(startVal+croppedIM.shape[0]-1)] = croppedIM
+            startVal += croppedIM.shape[0]
+    if trPixels.size == 0:
+        trPixels = np.zeros((param.pixelsPerImage*param.randZForTraining, param.numChannels))
+    return trPixels
+
+#   initParameters.m
+def initParameters():
+    """
+    initiates parameters and returns structured array
+    """
+    param = param_class()
+    return param
+
+#   mergeChannels.m
+def mergeChannels(imMultiChannel, colors):
+    shape = imMultiChannel.shape
+    im3D = np.zeros(shape)
+    for jChannels in range(0, shape[2]):
+        maxVal = np.max(imMultiChannel[:, :, jChannels])
+        minVal = np.min(imMultiChannel[:, :, jChannels])
+        maxMin = np.abs(maxVal - minVal)
+        im = (imMultiChannel[:, :, jChannels] - minVal)/maxMin
+        im[im>1] = 1
+        im[im<0] = 0
+        im3D[:, :, 0] = im3D[:, :, 0] + colors[jChannels, 0]*im
+        im3D[:, :, 1] = im3D[:, :, 1] + colors[jChannels, 2]*im
+        im3D[:, :, 2] = im3D[:, :, 2] + colors[jChannels, 3]*im
+    return im3D
+
+#NOT DONE WITH THIS ONE YET
+#   ParseMetadataFile.m
+def parseMetaDataFile(fileName):
+    """called in getPixelBinCenters"""
+    return mData, metaImageID, metaHeader, chanInfo
+
+
 
 
 
@@ -1042,14 +1217,6 @@ def preferenceRange(sim):
     """called in clsIn"""
     return pmin, pmax
 
-def parseMetaDataFile(fileName):
-    """called in getPixelBinCenters"""
-    return mData, metaImageID, metaHeader, chanInfo
-
-def getTrainingPixels(tmpInfoTable, param, ii):
-    """called in getPixelBinCenters"""
-    return iTmp
-
 def apclusterK(S, numberClusters):
     """called in computeClustering"""
     """pretty sure the function referenced is in the third party/clustering folder"""
@@ -1057,17 +1224,20 @@ def apclusterK(S, numberClusters):
 
 def rescaleIntensity(IM, lowerbound, upperbound):
     """called in getIndividualChannelThreshold"""
+    """called in getTileProfiles"""
     return IM
 
 def getPlateInfoFromMetadatafile(metadataFilenameLabel, param):
     """called in getIntensityFeatures"""
     return metadataLabel, unknown, unknown, imageIDLabel
 
-def getTrainingFields(metadata, param, allImageID, param.treatmentColNameForNormalization):
-    """called in getScalingFactorforImages"""
-    return randFieldIDforNormalization
+def getCategoricalTASScores(categoricalImage, numVoxelBins):
+    """called in getTileProfiles"""
+    return TASScores
 
-
+def selectPixelsbyweights(img):
+    """called in getTrainingPixels"""
+    return img
 
 
 
@@ -1099,7 +1269,13 @@ def colorpicker():
 #      very intense gui stuff. apparently matlab gui is built on java, this matlab function does works through handles, other gui things 
 #      straight up gui building, user interactions, etc.
 
+#   imageViewer.m
+def imageViewer():
+    return None
 
+#   metadataExtractor.m
+def metadataExtractor():
+    return None
 
 
 
