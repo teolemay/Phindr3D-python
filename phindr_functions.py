@@ -44,6 +44,7 @@ ALSO POSSIBLE THAT ALL THE THINGS CURRENTLY SET AS CLASSES (PARAM, PAR, C) SHOUL
 """
 
 import numpy as np
+from numpy.core.fromnumeric import size
 import scipy as sc
 import pandas as pd
 import time
@@ -144,6 +145,10 @@ def im2col(arr, shape, type='distinct'): # this implementation inspired from htt
         t3 = np.transpose(np.reshape(t2, (nele, t2.shape[0]/nele, -1)), (0, 2, 1))
         return np.reshape(t3, (nele, -1))
 
+#NOT done with this one yet
+x =  #bad code here to make unfinished function easy to find in long file.
+y = 
+z = 
 def kmeans(x, *args):
     """called in getpixelBins"""
     #matlab has a built-in k means clustering function. this is a placeholder until I choose how to write it in python.
@@ -398,6 +403,9 @@ def getImage2Display(mData, metaHeader, param, ImageID2View, imageID, chanInfo, 
     % typeOfView - Montage, MIP. Any other choice defaults to single plane
      """
     #  get image from image Id, sort z stacks, norm things, show image projection based on user choices.
+    x = 
+    y =
+    z = 
     return image2Display
 
 #   getImageIDfromMetadata.m
@@ -776,6 +784,8 @@ def getPixelBinCenters(mData, allImageId, param):
 
 #   getPixelBins.m
 def getPixelBins(x, numBins):
+    """called in getPixelBinCenters"""
+    """called in getMegaVoxelBinCenters"""
     """
     %getPixelBins Get pixel centers from training images
     % For each voxel, assign categories
@@ -801,10 +811,228 @@ def getPixelBins(x, numBins):
         binCenters = np.zeros((numBins, x.shape[1], numRandRpt))
         sumD = np.zeros((numRandRpt, 1))
         for iRandCycle in range(0, numRandRpt):
-            discard, binCenters[:, :, iRandCycle] = kmeans(x[np.random.rand(m, samSize)], #OTHER PARAMETERS)
+            discard, binCenters[:, :, iRandCycle] = kmeans(x[np.random.rand(m, samSize)], )#OTHER PARAMETERS)
 
     return binCenters
 
+#   getScalingFactorforImages.m
+def getScalingFactorforImages(metadata, allImageID, param):
+    """
+    compute lower and higher scaling values for each image
+    param: structure of parameter value
+    metadata: Metadata
+    """
+    if param.intensityNormPerTreatment:
+        randFieldIDforNormalization = getTrainingFields(metadata, param, allImageID, param.treatmentColNameForForNormalization)
+        grpVal = np.zeros((randFieldIDforNormalization.size, 1))
+    else:
+        randFieldIDforNormalization = getTrainingFields(metadata, param, allImageID, param.trainingColforImageCategories)
+    minChannel = np.zeros((randFieldIDforNormalization.size, param.numChannels))
+    maxChannel = np.zeros((randFieldIDforNormalization.size, param.numChannels))
+    numImages = randFieldIDforNormalization.size
+    for i in range(0, numImages):
+        ii = allImageID == randFieldIDforNormalization[i]
+        filenames = metadata[ii, 1:param.numChannels] #whenever stuff like this pops up, probably need to change to something like np.choose
+        if len(filenames) == 0:
+            print('SSS (no filenames)')
+        print(filenames[0, 0]) #in matlab this just returns the value at 0, 0 in the cell. for now, keep as print
+        if i == 0:
+            d, fmt = getImageInformation(filenames[:, 0])
+        d[0, 2] = np.sum(ii)
+        param = getTileInfo(d, param)
+        randZ = np.sum(ii)//2
+        randZ = np.random.Generator.integers(low=0, high=np.sum(ii), size=randZ)
+        filenames = filenames[randZ, :]
+        minVal = np.fill((filenames.shape[0], param.numChannels), np.inf)
+        maxVal = np.fill((filenames.shape[0], param.numChannels), -1*np.inf)
+        for j in range(0, param.numChannels):
+            for k in range(0, param.numChannels):
+                IM = io.imread(filenames[j, k], fmt)
+                minVal[j, k] = min(minVal[j, k], np.quantile(IM, 0.01))
+                maxVal[j, k] = max(maxVal[j, k], np.quantile(IM, 0.99))
+        minChannel[i, :] = np.min(minVal)
+        maxChannel[i, :] = np.max(maxVal)
+        if param.intensityNormPerTreatment:
+            grpVal[i] = np.unique(param.grpIndicesForIntensityNormalization[ii])
+    if param.intensityNormPerTreatment:
+        uGrp = np.unique(grpVal)
+        param.lowerbound = np.zeros((uGrp.size, param.numChannnels))
+        param.upperbound = np.zeros((uGrp.size, param.numChannels))
+        for i in range(0, uGrp.size):
+            ii = grpVal == uGrp[i]
+            if np.sum(ii) > 1:
+                param.lowerbound[i, :] = np.quantile(minChannel[grpVal == uGrp[i], :], 0.01)
+                param.upperbound[i, :] = np.quantile(maxChannel[grpVal == uGrp[i], :], 0.99)
+            else:
+                param.lowerbound[i, :] = minChannel[grpVal == uGrp[i], :]
+                param.upperbound[i, :] = maxChannel[grpVal == uGrp[i], :]
+    else:
+        param.lowerbound = np.quantile(minChannel, 0.01)
+        param.upperbound = np.quantile(maxChannel, 0.99)
+    return param
+
+#   getSuperVoxelBinCenters.m
+def getSuperVoxelBinCenters(mData, allImageId, param):
+    """
+    compute bin centers for super voxels
+    % mData  - Metadata
+    % allImageID - Image ID's of each image stack
+    % param - All parameters
+    """
+    param.pixelBinCenterDifferences = np.tensordot(param.pixelBinCenters, param.pixelBinCenters, axis=1).H
+    tilesForTraining = []
+    totalIterations = param.randFieldID.size + 1
+    for iImages in range(0, param.randFieldID.size):
+        ii = allImageId == param.randFieldID[iImages]
+        d, param.fmt = getImageInformation(mData[ii, 0])
+        param = getTileInfo(d, param)
+        tmpInfoTable = mData[ii, 0:param.numChannels]
+        superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpInfoTable, param.pixelBinCenters, param, ii)
+        tmp = superVoxelProfile[fgSuperVoxel, :] #i think fg means foreground
+        if param.superVoxelPerField > tmp.shape[0]:
+            tilesForTraining = [tilesForTraining, tmp[:, :]]
+        else:
+            selBlocks = np.random.Generator.integers(low=0, high=tmp.shape[0], size=param.superVoxelPerField)
+            tilesForTraining = [tilesForTraining, tmp[selBlocks, :]]
+    param.supervoxelBincenters = getPixelBins(tilesForTraining, param.numSuperVoxelBins)
+    return param
+
+#   getTileInfo.m
+def getTileInfo(dimSize, param):
+    """called in getPixelBinCenters"""
+    """called in extractImageLevelTextureFeatures"""
+    """called in getImageThresholdValues"""
+    """called in getSuperVoxelbinCenters"""
+    """
+    computes how many pixels and stacks that need to be retained based on user choices.
+    """
+    xOffset = dimSize[0] % param.tileX
+    yOffset = dimSize[1] % param.tileY
+    zOffset = dimSize[2] % param.tileZ
+
+    param.croppedX = dimSize[0] - xOffset
+    param.croppedY = dimSize[1] - yOffset
+    param.croppedZ = dimSize[2] - zOffset
+    
+    superVoxelXOffset = (param.croppedX/param.tileX) % param.megaVoxelTileX
+    superVoxelYOffset = (param.croppedY/param.tileY) % param.megaVoxelTileY
+    superVoxelZOffset = (param.croppedZ/param.tileZ) % param.megaVoxelTileZ
+    param.origX = dimSize[0]
+    param.origY = dimSize[1]
+    param.origZ = dimSize[2]
+
+    if xOffset % 2 == 0:
+        param.XOffsetStart = xOffset/2 + 1
+        param.XOffsetEnd = xOffset/2
+    else:
+        param.XOffsetStart = xOffset//2 + 1
+        param.XOffsetEnd = -(-xOffset//2 )  #ceiling division is the same as upside-down floor division. 
+    if yOffset % 2 == 0:
+        param.YOffsetStart = yOffset/2 + 1
+        param.YOffsetEnd = yOffset/2
+    else:
+        param.YOffsetStart = yOffset//2 + 1
+        param.YOffsetEnd = -(-yOffset//2 )     
+    if zOffset % 2 == 0:
+        param.ZOffsetStart = zOffset/2 + 1
+        param.ZOffsetEnd = zOffset/2
+    else:
+        param.ZOffsetStart = zOffset//2 + 1
+        param.ZOffsetEnd = -(-zOffset//2 )    
+
+    if superVoxelXOffset % 2 == 0:
+        param.superVoxelXOffsetStart = superVoxelXOffset/2 + 1
+        param.superVoxelXOffsetEnd = superVoxelXOffset/2
+    else:
+        param.superVoxelXOffsetStart = superVoxelXOffset//2 + 1
+        param.superVoxelXOffsetEnd = -(-superVoxelXOffset//2) #same floor division trick.
+    if superVoxelXOffset != 0: #add pixel rows if size of supervoxels are not directly visible
+        numSuperVoxelsToAddX = param.megaVoxelTileX - superVoxelXOffset
+        if numSuperVoxelsToAddX % 2 == 0:
+            param.superVoxelXAddStart = numSuperVoxelsToAddX/2
+            param.superVoxelXAddEnd = numSuperVoxelsToAddX/2
+        else:
+            param.superVoxelXAddStart = numSuperVoxelsToAddX // 2
+            param.superVoxelXAddEnd = -(-numSuperVoxelsToAddX // 2 )
+    else:
+        param.superVoxelXAddStart = 0
+        param.superVoxelXAddEnd = 0
+    #same along other axes.
+    if superVoxelYOffset != 0:
+        numSuperVoxelsToAddY = param.megaVoxelTileY - superVoxelYOffset
+        if numSuperVoxelsToAddY % 2 == 0:
+            param.superVoxelYAddStart = numSuperVoxelsToAddY/2
+            param.superVoxelYAddEnd = numSuperVoxelsToAddY/2
+        else:
+            param.superVoxelYAddStart = numSuperVoxelsToAddY //2
+            param.superVoxelYAddEnd = -(- numSuperVoxelsToAddY //2)
+    else:
+        param.superVoxelYAddStart = 0
+        param.superVoxelYAddEnd = 0
+    if superVoxelZOffset != 0:
+        numSuperVoxelsToAddZ = param.megaVoxelTileZ - superVoxelZOffset
+        if numSuperVoxelsToAddZ % 2 == 0:
+            param.superVoxelZAddStart = numSuperVoxelsToAddZ/2
+            param.superVoxelZAddEnd = numSuperVoxelsToAddZ/2
+        else:
+            param.superVoxelZAddStart = numSuperVoxelsToAddZ //2
+            param.superVoxelZAddEnd = -(-numSuperVoxelsToAddZ//2)
+    else:
+        param.superVoxelZAddStart = 0
+        param.superVoxelZAddEnd = 0
+    #continue first part of supervoxels offset parity with other axes
+    if superVoxelYOffset % 2 == 0:
+        param.superVoxelYOffsetStart = superVoxelYOffset/2 + 1
+        param.superVoxelYOffsetEnd = superVoxelYOffset/2
+    else:
+        param.superVoxelYOffsetStart = superVoxelYOffset//2 + 1
+        param.superVoxelYOffsetEnd = -(-superVoxelYOffset//2)
+    if superVoxelZOffset % 2 ==0:
+        param.superVoxelZOffsetStart = superVoxelZOffset/2 + 1
+        param.superVoxelZOffsetEnd = superVoxelZOffset/2
+    else:
+        param.superVoxelZOffsetStart = superVoxelZOffset//2 +1
+        param.superVoxelZOffsetEnd = -(-superVoxelZOffset//2)
+
+    param.numSuperVoxels = (param.croppedX*param.croppedY*param.croppedZ)//(param.tileX*param.tileY*param.tileZ) #supposed to be all elementwise operations (floor division too)
+    param.numSuperVoxelsXY = (param.croppedX*param.croppedY)/(param.tileX*param.tileY)
+
+    tmpX = (param.croppedX/param.tileX) + superVoxelXOffset
+    tmpY = (param.croppedY/param.tileY) + superVoxelYOffset
+    tmpZ = (param.croppedZ/param.tileZ) + superVoxelZOffset
+
+    param.numMegaVoxels = (tmpX*tmpY*tmpZ) // (param.megaVoxelTileX*param.megaVoxelTileY*param.megaVoxelTileZ)
+    param.numMegaVoxelsXY = (tmpX*tmpY)/(param.megaVoxelTileX*param.megaVoxelTileY)
+
+    param.superVoxelRow = np.linspace(0, param.croppedX, num=int(param.croppedX/param.tileX + 1)).astype(int) #I think it should be integer because it seems like we will be indexing with this
+    param.superVoxelCol = np.linspace(0, param.croppedY, num=int(param.croppedY/param.tileY + 1)).astype(int)
+    param.superVoxelZ = np.linspace(0, param.croppedZ, num=int(param.croppedZ/param.tileZ + 1)).astype(int)
+
+    param.megaVoxelRow = np.linspace(0, param.croppedX, num=int(param.croppedX/param.megaVoxelTileX + 1)).astype(int)
+    param.megaVoxelCol = np.linspace(0, param.croppedY, num=int(param.croppedY/param.megaVoxelTileY + 1)).astype(int)
+    param.megaVoxelZ = np.linspace(0, param.croppedZ, num=int(param.croppedZ/param.megaVoxelTileZ + 1)).astype(int)
+    
+    return param
+
+#   getTileProfiles.m
+def getTileProfiles(filenames, pixelBinCenters, param, ii):
+    """called in extractImageLevelTextureFeatures"""
+    """called in getMegaVoxelBinCenters"""
+    """
+    computes low level categorical features for supervoxels
+    function assigns categories for each pixel, computes supervoxel profiles for each supervoxel
+    % Inputs:
+    % filenames - Image file names images x numchannels
+    % pixelBinCenters - Location of pixel categories: number of bins x number
+    % of channels
+    % Output:
+    % superVoxelProfile: number of supervoxels by number of supervoxelbins plus
+    % a background
+    % fgSuperVoxel: Foreground supervoxels - At lease one of the channles
+    % should be higher than the respective thrshold
+    % TASScores: If TAS score is sleected
+    """
+    return superVoxelProfile, fgSuperVoxel
 
 
 
@@ -814,12 +1042,6 @@ def preferenceRange(sim):
     """called in clsIn"""
     return pmin, pmax
 
-def getTileInfo(d, param):
-    """called in getPixelBinCenters"""
-    """called in extractImageLevelTextureFeatures"""
-    """called in getImageThresholdValues"""
-    return param
-
 def parseMetaDataFile(fileName):
     """called in getPixelBinCenters"""
     return mData, metaImageID, metaHeader, chanInfo
@@ -828,21 +1050,10 @@ def getTrainingPixels(tmpInfoTable, param, ii):
     """called in getPixelBinCenters"""
     return iTmp
 
-def getPixelBins(pixelsForTraining, numVoxelBins):
-    """called in getPixelBinCenters"""
-    """called in getMegaVoxelBinCenters"""
-    return pixelBinCenters
-
 def apclusterK(S, numberClusters):
     """called in computeClustering"""
     """pretty sure the function referenced is in the third party/clustering folder"""
     return clusterResult
-
-def getTileProfiles(tmpInfoTable, pixelBinCenters, param, ii):
-    """called in extractImageLevelTextureFeatures"""
-    """called in getMegaVoxelBinCenters"""
-
-    return superVoxelProfile, fgSuperVoxel
 
 def rescaleIntensity(IM, lowerbound, upperbound):
     """called in getIndividualChannelThreshold"""
@@ -851,6 +1062,12 @@ def rescaleIntensity(IM, lowerbound, upperbound):
 def getPlateInfoFromMetadatafile(metadataFilenameLabel, param):
     """called in getIntensityFeatures"""
     return metadataLabel, unknown, unknown, imageIDLabel
+
+def getTrainingFields(metadata, param, allImageID, param.treatmentColNameForNormalization):
+    """called in getScalingFactorforImages"""
+    return randFieldIDforNormalization
+
+
 
 
 
