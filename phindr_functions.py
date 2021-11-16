@@ -1239,6 +1239,7 @@ def parseMetaDataFile(metadatafilename):
         kk = np.argsort(kk)
         mData[ii, :] = tmp[kk, :]
     ii = header == 'ImageID' #also needs to be case insensitive
+    imageID = mData[:, ii].astype(np.uint8) #hpe this works, might need to do as list comprehension instead
     return mData, imageID, header, chanInfo
 
 #   rescaleIntensity.m
@@ -1338,17 +1339,10 @@ def writestr(fname, data, wflag):
 
 
 #need to find these ones
-def preferenceRange(sim):
-    """called in clsIn"""
-    return pmin, pmax
-
-def apclusterK(S, numberClusters):
-    """called in computeClustering"""
-    """pretty sure the function referenced is in the third party/clustering folder"""
-    return clusterResult
 
 def getPlateInfoFromMetadatafile(metadataFilenameLabel, param):
     """called in getIntensityFeatures"""
+    """function not defined in lib, third party/clustering, organoidCSApp folders"""
     return metadataLabel, unknown, unknown, imageIDLabel
 
 def getCategoricalTASScores(categoricalImage, numVoxelBins):
@@ -1407,7 +1401,7 @@ def setParametervalues(handles, param):
 #   setParameters.m
 def setParameters(input):
     """GUI stuff. calls setParameterValues"""
-    return output
+    return None
 
 #   setTextInformation.m
 def setTextInformation(textHandle, imageFileName, channelNames, channelColors, selectedChannels, projectionType):
