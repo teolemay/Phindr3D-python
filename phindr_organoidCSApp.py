@@ -20,6 +20,7 @@ def imadjust(img, inrange=[0,1], outrange=[0,1], gamma=1):
     a, b = inrange
     c, d = outrange
     adjusted = (((img - a)/(b-a)) ** gamma) * (d-c) + c
+    return adjusted
 
 def imfill(img):
     """
@@ -36,7 +37,7 @@ def imfill(img):
     tmp = np.zeros((rows+2, cols+2))
     tmp[1:-1, 1:-1] = img #make a copy of img padded on all sides by zeros
     flooded = seg.flood_fill(tmp, (0,0), 1, in_place=True) #default is already full connectivity including diagonals as desired.
-    inverted = 1 - flooded
+    inverted = flooded*(-1) + 1
     inverted = inverted[1:-1, 1:-1] #get rid of padding
     return np.logical_or(img, inverted) #works!
 
