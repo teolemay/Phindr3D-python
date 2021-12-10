@@ -3,4 +3,5 @@ Translation of Phindr3D from matlab to python
 
 Work in progress.
 
-Using jupyter notebook would probably be good way to set up functionalities before building a gui.
+Jupyter notebook seems to work, can process images.
+clustering and classification still to come.
