@@ -8,12 +8,26 @@ import numpy as np
 import random
 import matplotlib.pyplot as plt
 import time
+import scipy as sc
+from sklearn.cluster import AffinityPropagation
 
 eps = np.finfo(np.float64).eps
 realmin = np.finfo(np.float64).tiny
 realmax = np.finfo(np.float64).max
 
-def apcluster(s, p, sparse=False, maxits=500, convits=50, dampfact=0.5, plot=True, details=False, nonoise=False):
+def apcluster_sklearn(s, p, sparse=False, maxits=500, convits=15, dampfact=0.5, plot=False, details=False, nonoise=False):
+    """
+    litterally just cluster, no statistics given or nothing.
+    """
+    af = AffinityPropagation(damping=dampfact, max_iter=maxits, convergence_iter=convits, preference=p, affinity='euclidean', verbose=details).fit(s)
+    center_indices = af.cluster_centers_indices_
+    which_cluster = af.labels_
+    idx = center_indices[which_cluster]
+    nice_labels = which_cluster + 1
+    return idx, nice_labels
+
+
+def apcluster(s, p, sparse=False, maxits=500, convits=50, dampfact=0.5, plot=False, details=False, nonoise=False):
     """in third party/clustering"""
     """
     s = similarities
@@ -140,6 +154,7 @@ def apcluster(s, p, sparse=False, maxits=500, convits=50, dampfact=0.5, plot=Tru
     % non-commercial purposes.
     """
     ##Global R, A, E, tmpidx, tmpnetsim, S #These get define later down, BUT maybe only behind an if statement.
+    ##check inputs
     if sparse == True:
         return apcluster_sparse(s, p, maxits=maxits, convits=convits, dampfact=dampfact, plot=plot, details=details, nonoise=nonoise)
     maxits = int(maxits)
@@ -173,43 +188,48 @@ def apcluster(s, p, sparse=False, maxits=500, convits=50, dampfact=0.5, plot=Tru
         elif np.minimum(np.min(s[:, 0]), np.min(s[:, 1])) < 0:
             print('Error, indices must be >= 0')
             return None
+    elif s.shape[0] == s.shape[1]:
+        N = s.shape[0]
+        if (np.array([p]).size != N) and (not np.isscalar(p)):
+            print('Error, p should be scalar or vector of size N')
+            return None
     else:
         print('Error, s must have 3 columns or be square.')
         return None 
     #construct similarity matrix
     if N > 3000:
         print('\nLarge memory request, consider setting sparse=True\n')
-    if s.shape[1] == 3:
+    if s.shape[1] == 3: #make square similarity matrix
         S = np.full((N, N), -np.inf)
         for j in range(0, s.shape[0]):
             S[s[j, 0], s[j, 1]] = s[j, 3]
     else:
-        S = s
+        S = s.copy()
     #in case user did not remove degeneracies from input similarities, avoid degenerate solutions by adding small noise to input similarities
     if not nonoise:
         rns = np.random.get_state()
         np.random.seed(0)
-        S = S + (eps*S + realmin*100)*np.random.random((N,N))
+        S = S + (eps*S+realmin*100)*np.random.random((N,N)) #(eps*S+realmin*100) is orginial form (probably too small to make a difference)
         np.random.set_state(rns)
     #place preference on diagonal of S
-    if len(p)==1:
+    if np.isscalar(p):
         for i in range(N):
             S[i,i] = p
     else:
         for i in range(N):
             S[i, i] = p[i]
-    #place for messages, etc:
+    #make place for messages, etc:
     dS = np.diag(S)
     A = np.zeros((N, N))
     R = np.zeros((N, N))
     t = 1
     if plot:
-        netsim=np.zeros((1, maxits+1))
+        netsim=np.zeros(maxits+1)
     if details:
         idx = np.zeros((N, maxits+1))
-        netsim = np.zeros((N, maxits+1))
-        dpsim = np.zeros((N, maxits+1))
-        expref = np.zeros((N, maxits+1))
+        netsim = np.zeros(maxits+1)
+        dpsim = np.zeros(maxits+1)
+        expref = np.zeros(maxits+1)
     
     #execute parallel affinity propagation updates!
     e = np.zeros((N, convits))
@@ -218,22 +238,22 @@ def apcluster(s, p, sparse=False, maxits=500, convits=50, dampfact=0.5, plot=Tru
     while not dn:
         i += 1
         #compute responsibilities
-        Rold=R
+        Rold=R.copy()
         AS = A + S
         Y = np.amax(AS, axis=1)
         I = np.argmax(AS, axis=1) #have to remember that I is along axis 1
         for k in range(N):
-            AS[k, I][k] = -realmax
+            AS[k, I[k]] = -realmax
         Y2 = np.amax(AS, axis=1)
-        I2 = np.argmax(AS, axis=2)
-        R = S-np.tile(Y, [1, N])
+        I2 = np.argmax(AS, axis=1)
+        R = S-np.tile(Y, [N, 1])
         for k in range(N):
-            R[k, I(k)] = S[k, I[k]] - Y2[k]
+            R[k, I[k]] = S[k, I[k]] - Y2[k]
         #damping
         R = (1-lam)*R + lam*Rold
 
         #compute availabilities
-        Aold = A
+        Aold = A.copy()
         Rp = np.maximum(R, 0)
         for k in range(N):
             Rp[k, k]=R[k, k]
@@ -247,19 +267,17 @@ def apcluster(s, p, sparse=False, maxits=500, convits=50, dampfact=0.5, plot=Tru
 
         #check for convergence
         E = ((np.diag(A) + np.diag(R)) > 0)
-        e[:, (i+1)%convits+1]=E
+        e[:, (i-1)%convits]=E
         K=np.sum(E) #I think E is a vector so sum should work properly
         if i>=convits or i>=maxits:
             se = np.sum(e, axis=1)
             unconverged = (np.sum((se==convits)+(se==0))!= N)
             if (not unconverged and (K>0)) or (i == maxits):
                 dn=True
+        #handle plotting/details storage
         if plot or details:
             if K == 0:
-                tmpnetsim=np.nan
-                tmpdpsim=np.nan
-                tmpexpref=np.nan
-                tmpidx=np.nan
+                tmpnetsim=np.nan; tmpdpsim=np.nan; tmpexpref=np.nan; tmpidx=np.nan
             else:
                 I = np.nonzero(E)
                 tmp = np.amax(S[:, I], axis=1)
@@ -285,24 +303,28 @@ def apcluster(s, p, sparse=False, maxits=500, convits=50, dampfact=0.5, plot=Tru
             plt.show()
             time.sleep(2)
             plt.close()
+
     #identify exemplars
-    I = np.nonzero(np.diag(A+R)>0)
-    K = len(I)
+    I = np.nonzero(np.diag(A+R)>0)[0] #non-zero returns a tuple: (array of indices, type)
+    K = max(I.shape) #fixed len to matlab "Length"
     if K > 0:
         #identify clusters
-        tmp = np.amax(S[:, I], axis=1)
-        c = np.argmax(S[:, I], axis=1)
+        tmp = np.amax(S[:, I], axis=1) #all rows, columns from I, max along column axis
+        c = np.argmax(S[:, I], axis=1) #index of maximum along axis()
         c[I] = np.arange(0, K)
         #refine the final set of exemplars and clusters and return results
         for k in range(K):
-            ii = np.nonzero(c==k)
-            y = np.amax(S[ii, ii], axis=0)
-            j = np.argmax(S[ii, ii], axis=0)
-            I[k] = ii[j[0]]
+            ii = np.nonzero(c==k)[0] 
+            # y = np.max(np.sum(S[ii, ii], axis=0))
+            j = np.argmax(np.sum(S[ii, ii], axis=0))
+            I[k] = ii[j]
         tmp = np.amax(S[:, I], axis=1)
         c = np.argmax(S[:, I], axis=1)
         c[I] = np.arange(0, K)
-        tmpidx = I[c]
+        tmpidx = I[c] #choose I's based on c
+        flat = S.ravel() #for linear indexing in next line
+        tmpnetsim=np.sum(flat[(tmpidx)*N + np.arange(0, N)])# this formula is for linear indices #possibly wrong
+        tmpexpref = np.sum(dS[I])
     else:
         tmpidx = np.full((N, 1), np.nan)
         tmpnetsim = np.nan
@@ -332,10 +354,6 @@ def apcluster(s, p, sparse=False, maxits=500, convits=50, dampfact=0.5, plot=Tru
         print('To monitor net similarity, activate plotting. Also consider increasing maxits and if necessary, dampfact.')
     return idx, netsim, dpsim, expref, unconverged
 
-def preferenceRange(sim):
-    """called in clsIn"""
-    """in third party/clustering folder"""
-    return None
 
 def apclusterK(s, kk, prc=10):
     """called in computeClustering"""
@@ -359,7 +377,7 @@ def apclusterK(s, kk, prc=10):
             S[s[j, 1]] = s[j,2]
     else:
         N = s.shape[0]
-        S = s
+        S = s.copy()
     rns = np.random.get_state()
     np.random.seed(0)
     S = S + (eps*S + realmin*100)*np.random.random((N,N))
@@ -385,8 +403,8 @@ def apclusterK(s, kk, prc=10):
     else:
         dpsim2 = -np.inf
         for j21 in range(N-1):
-            for j22 in range(j21, N):
-                tmp = np.sum(np.max(S[:, j21, j22], axis=2)) #this indexing is very awkckward to do in python
+            for j22 in range(j21+1, N):
+                tmp = np.sum(np.amax(S[:, [j21, j22]], axis=1)) #this indexing is very awkckward to do in python
                 if tmp > dpsim2:
                     dpsim2 = tmp 
                     k21 = j21 
@@ -436,6 +454,7 @@ def apclusterK(s, kk, prc=10):
     pref = tmppref
     print(f'Found {tmpk} clusters using a preference of {pref}')
     return idx, netsim, dpsim, expref, pref
+
 
 def apcluster_sparse(s, p, maxits=500, convits=50, dampfact=0.5, plot=False, details=False, nonoise=False):
     """
@@ -677,21 +696,466 @@ def apcluster_sparse(s, p, maxits=500, convits=50, dampfact=0.5, plot=False, det
             unconverged = (np.sum((se==convits)+(se==0)) != N)
             if (not unconverged and (K>0)) or (i==maxits):
                 dn=True
-    
-
-
-
+        
+        #handle plotting and detail storage if required.
+        if plot or details:
+            if k == 0:
+                tmpnetsim=np.nan
+                tmpdpsim=np.nan
+                tmpexpref=np.nan
+                tmpidx=np.nan
+            else:
+                tmpidx = np.zeros((N, 1))
+                tmpdsim=0
+                tmpidx[np.nonzero(E)] = np.nonzero(E)
+                tmpexpref=np.sum(p[np.nonzero(E)])
+                discon = False
+                for j in np.where(E == 0):
+                    ss = s[ind1[ind1s[j]:ind1e[j]], 2]
+                    ii = s[ind1[ind1s[j]:ind1e[j]], 1]
+                    ee = np.nonzero(E[ii])
+                    if len(ee) == 0:
+                        discon=True
+                    else:
+                        smx = np.max(ss[ee])
+                        imx = np.argmax(ss[ee])
+                        tmpidx[j] = ii[ee[imx]]
+                        tmpdpsim += smx
+                if discon:
+                    tmpnetsim=np.nan
+                    tmpdpsim=np.nan
+                    tmpexpref=np.nan
+                    tmpidx = np.nan
+                else:
+                    tmpnetsim = tmpdpsim + tmpexpref
+        if details:
+            netsim[i] = tmpnetsim
+            dpsim[i] = tmpdpsim
+            expref[i] = tmpexpref
+            idx[:, i] = tmpidx
+        if plot:
+            netsim[i] = tmpnetsim
+            plt.figure()
+            tmp = np.arrange(0, i)
+            tmpi = np.nonzero(np.isfinite(netsim[:i]))
+            plt.plot(tmp[tmpi], netsim[tmpi])
+            plt.xlabel('# iterations')
+            plt.ylabel('Net similarity of quantized intermediate solutions')
+            plt.show()
+    #identify exemplars
+    E = ((A[M-N:M] + R[M-N:M])> 0)
+    K = np.sum(E)
+    if K>0:
+        tmpidx = np.zeros((N, 1))
+        tmpidx[np.nonzero(E)] = np.nonzero[E] #identify clusters
+        for j in np.nonzero(E==0).T:
+            ss = s[ind1[ind1[j]:ind1e[j]], 2]
+            ii = s[ind1[ind1[j]:ind1e[j]], 1]
+            ee = np.nonzero(E[ii])
+            smx = np.max(ss[ee])
+            imx = np.argmax([ss[ee]])
+            tmpidx[j] = ii[ee[imx]]
+        EE=np.zeros((N, 1))
+        for j in np.nonzero(E).T:
+            jj = np.nonzero(tmpidx==j)
+            mx= -np.inf #this doesnt get used
+            ns = np.zeros((N, 1))
+            msk=p.zeros((N,1))
+            for m in jj.T:
+                mm=s[ind1[ind1s[m]:ind1e[m]], 1]
+                msk[mm] = msk[mm] + 1
+                ns[mm] = ns[mm] + s[ind1[ind1s[m]:ind1e[m]], 2]
+            ii = jj[np.nonzero(msk[jj]==len(jj))]
+            smx = np.max(ns[ii])
+            imx = np.argmax(ns[ii])
+            EE[ii[imx]] = 1
+        E=EE
+        tmpidx=np.zeros((N, 1))
+        tmpdpsiim=0
+        tmpidx[np.nonzero(E)] = np.nonzero(E)
+        tmpexpref = np.sum(p[np.nonzero(E)])
+        for j in np.nonzero(E==0).T:
+            ss = s[ind1[ind1s[j]:ind1e[j]], 2]
+            ii = s[ind1[ind1s[j]:ind1e[j]], 1]
+            ee = np.nonzero(E[ii])
+            smx = np.max(ss[ee])
+            imx = np.argmax(ss[ee])
+            tmpidx[j] = ii[ee[imx]]
+            tmpdpsim = tmpdpsim+smx
+        tmpnetsim = tmpdpsim + tmpexpref
+    else:
+        tmpidx = np.full((N, 1), np.nan)
+        tmpnetsim=np.nan
+        tmpexpref = np.nan
+    if details:
+        netsim[i+1] = tmpnetsim
+        netsim=netsim[:i+1]
+        dpsim[i+1] = tmpnetsim - tmpexpref
+        dpsim=dpsim[:i+1]
+        expref[i+1] = tmpexpref
+        expref = expref[:i+1]
+        idx[:, i+1] = tmpidx
+        idx = idx[:, :i+1]
+    else:
+        netsim = tmpnetsim
+        dpsim = tmpnetsim - tmpexpref 
+        expref = tmpexpref
+        idx = tmpidx 
+    if plot or details:
+        print(f'\nNUmber of identified clusters: {K}')
+        print(f'Fitness (net similarity): {tmpnetsim}')
+        print(f'\tSimilarities of data points to exemplars: {dpsim[-1]}')
+        print(f'\tPreferences of selected exemplars: {tmpexpref}')
+        print(f'Number of iterations: {i}')
+    if unconverged:
+        print(f'\n*** Warning: Algorithm did not converger. The similarities may contain degeneracies.')
+        print(f'\tAdd noise to similarities to remove degeneracies. To monitor thhe similarity, activate plotting.')
+        print(f'also consider increasing maxits and if necessary dampfact')
     return idx, netsim, dpsim, expref
 
 
+# the following were previously in folder with other lib functions. however, since they directly relate  to clustering, I will put them here.
 
+class C_class:
+    """
+    a data structure used in the clsIn function.
+    """
+    def __init__(self):
+        self.minClsSize = 5
+        self.maxCls = 10
+        self.minCls = 1
+        self.S = []
+        self.pmin = 0
+        self.pmax = 0
+        self.pmed = 0
 
+#   clsIn.m
+def clsIn(data, beta=0.05, dis='euclidean'):
+    """
+    dis can be: "euclidean" OR "cosine" OR "hamming"
+    """
+    dis = dis.lower()
+    if data.size == 0: #check if data is empty array
+        print('Data is empty')
+        return None
+    C = C_class()
+    C.minClsSize = 5
+    C.maxCls = 10
+    C.minCls = 1
+    C.S = []
+    C.pmin = 0
+    C.pmax = 0
+    C.pmed = 0
+    sim = sc.spatial.distance.cdist(data, data, metric=dis)
+    if dis == 'euclidean':
+        sim = -1*sim
+    elif (dis == 'cosine') or (sim == 'hamming'):
+        sim = 1 - sim
+    x_x = np.tril(np.ones((sim.shape[0], sim.shape[0]), dtype=bool), -1) #lower triangular matrix True below the diagonal, false elsewhere.
+    C.pmed = np.median(sim[x_x]) #i think this is the right axis, but very unsure. Should be median along rows of 2d matrix since sim[x_x] is 2d matrix however, numpy rows and cols are different than in matlab.
+    C.pmin, C.pmax = preferenceRange(sim)
+    C.S = sim #similarity matrix
+    return C
 
+def preferenceRange(s, method='bound'):
+    """called in clsIn"""
+    """in third party/clustering folder"""
+    """
+    % Given a set of similarities, s, this function computes a lower
+    % bound, pmin, on the value for the preference where the optimal
+    % number of clusters (exemplars) changes from 1 to 2, and the
+    % exact value of the preference, pmax, where the optimal
+    % number of clusters changes from n-1 to n.
+    %
+    % For N data points, there may be as many as N^2-N pair-wise
+    % similarities (note that the similarity of data point i to k
+    % need not be equal to the similarity of data point k to i).
+    % These may be passed in an NxN matrix of similarities, s, where
+    % s(i,k) is the similarity of point i to point k. In fact, only
+    % a smaller number of relevant similarities need to be provided,
+    % in which case the others are assumed to be -Inf. M similarity
+    % values are known, can be passed in an Mx3 matrix s, where each
+    % row of s contains a pair of data point indices and a
+    % corresponding similarity value: s(j,3) is the similarity of
+    % data point s(j,1) to data point s(j,2).
+    %
+    % A single-cluster solution may not exist, in which case pmin is
+    % set to NaN.
+    %
+    % [pmin,pmax]=preferenceRange(s,METHOD) uses one of the methods
+    % below to compute pmin and pmax:
+    %
+    %   'exact'      Computes the exact values for pmin and pmax
+    %                (Warning: This can be quite slow)
+    %
+    %   'bound'      Computes the exact value for pmax, but estimates
+    %                pmin using a bound (default)
+    %
+    % Copyright (c) Brendan J. Frey and Delbert Dueck (2007). This
+    % software may be freely used and distributed for
+    % non-commercial purposes.
+    """
+    if len(s.shape) !=  2:
+        print('\nError: s shuld be a 2d matrix\n')
+        return None
+    elif s.shape[1] == 3:
+        N = np.maximum(np.max(s[:, 0]), np.max(s[:, 1]))
+        if np.minimum(np.min(s[:, 0]), np.min(s[:, 1])) < 0:
+            print('\nError: data point indices must be >= 0')
+            return None
+    elif s.shape[0] == s.shape[1]:
+        N = s.shape[0]
+    else:
+        print('\nError: s must have 3 colummns or be square\n')
+        return None
+    #construct similarity matrix:
+    if s.shape[1] == 3:
+        S = np.full((N, N), -np.inf)
+        for j in range(s.shape[0]):
+            S[s[j, 0], s[j, 1]] = s[j, 2]
+    else:
+        S=s.copy()
+    for k in range(N):
+        S[k,k] = 0
+    #find pmin
+    dpsim1 = np.max(np.sum(S, axis=0))
+    k11 = np.argmax(np.sum(S, axis=0))
+    if dpsim1 == -np.inf:
+        pmin = np.nan
+    elif method == 'bound':
+        for k in range(N):
+            S[k,k] = -np.inf
+        m = np.max(S, axis=1)
+        tmp = np.sum(m, axis=0)
+        yy = np.min(m, axis=0)
+        ii = np.argmin(m, axis=0)
+        tmp = tmp-yy-np.min(np.concatenate((m[:ii], m[ii+1:N])))
+        pmin = dpsim1-tmp
+    elif method == 'exact':
+        dpsim2 = -np.inf
+        for j21 in range(N-1):
+            for j22 in range(j21, N):
+                tmp=np.sum(np.max(S[:, (j21, j22)]), axis=1) #poor indexing. probably wont work
+                if tmp > dpsim2:
+                    dpsim2 = tmp
+                    k21 = j21
+                    k22 = j22
+        pmin = dpsim1 - dpsim2
+    else:
+        print('\nError: please properly specify method from "bound" or "exact"\n')
+    #find pmax
+    for k in range(N):
+        S[k, k] = -np.inf
+        pmax = np.max(S)
+    return pmin, pmax
 
+#   computeClustering.m
+def computeClustering(data, numberClusters, type='AP', sparse=False, maxits=500, convits=15, dampfact=0.5, plot=False, details=False, nonoise=False):
+    print('ran')
+    type = type.upper()
+    C = clsIn(data)
+    print(C.pmed)
+    if type == 'AP':
+        clusterResult = apclusterK(C.S, numberClusters)
+    elif type == 'SK':
+        print(C.pmed)
+        clusterResult = apcluster_sklearn(data, numberClusters, sparse=sparse, maxits=maxits, convits=convits, dampfact=dampfact, plot=plot, details=details, nonoise=nonoise)
+    else:
+        clusterResult = np.arange(0, data.shape[0])
+    return clusterResult
 
+def cmdscale(D):
 
+    #copied from https://github.com/tompollard/sammon as no other python libraries appear to have implemented sammon mapping.
 
+    """                                                                                       
+    Classical multidimensional scaling (MDS)                                                  
+                                                                                               
+    Parameters                                                                                
+    ----------                                                                                
+    D : (n, n) array                                                                          
+        Symmetric distance matrix.                                                            
+                                                                                               
+    Returns                                                                                   
+    -------                                                                                   
+    Y : (n, p) array                                                                          
+        Configuration matrix. Each column represents a dimension. Only the                    
+        p dimensions corresponding to positive eigenvalues of B are returned.                 
+        Note that each dimension is only determined up to an overall sign,                    
+        corresponding to a reflection.                                                        
+                                                                                               
+    e : (n,) array                                                                            
+        Eigenvalues of B.                                                                     
+                                                                                               
+    """
+    # Number of points                                                                        
+    n = len(D)
+ 
+    # Centering matrix                                                                        
+    H = np.eye(n) - np.ones((n, n))/n
+ 
+    # YY^T                                                                                    
+    B = -H.dot(D**2).dot(H)/2
+ 
+    # Diagonalize                                                                             
+    evals, evecs = np.linalg.eigh(B)
+ 
+    # Sort by eigenvalue in descending order                                                  
+    idx   = np.argsort(evals)[::-1]
+    evals = evals[idx]
+    evecs = evecs[:,idx]
+ 
+    # Compute the coordinates using positive-eigenvalued components only                      
+    w, = np.where(evals > 0)
+    L  = np.diag(np.sqrt(evals[w]))
+    V  = evecs[:,w]
+    Y  = V.dot(L)
+ 
+    return Y, evals[evals > 0]
+   
+def sammon(x, n, display = 2, inputdist = 'raw', maxhalves = 20, maxiter = 500, tolfun = 1e-9, init = 'default'):
 
+    #copied from https://github.com/tompollard/sammon as no other python libraries appear to have implemented sammon mapping.
+
+    from scipy.spatial.distance import cdist
+
+    """Perform Sammon mapping on dataset x
+    y = sammon(x) applies the Sammon nonlinear mapping procedure on
+    multivariate data x, where each row represents a pattern and each column
+    represents a feature.  On completion, y contains the corresponding
+    co-ordinates of each point on the map.  By default, a two-dimensional
+    map is created.  Note if x contains any duplicated rows, SAMMON will
+    fail (ungracefully). 
+    [y,E] = sammon(x) also returns the value of the cost function in E (i.e.
+    the stress of the mapping).
+    An N-dimensional output map is generated by y = sammon(x,n) .
+    A set of optimisation options can be specified using optional
+    arguments, y = sammon(x,n,[OPTS]):
+       maxiter        - maximum number of iterations
+       tolfun         - relative tolerance on objective function
+       maxhalves      - maximum number of step halvings
+       input          - {'raw','distance'} if set to 'distance', X is 
+                        interpreted as a matrix of pairwise distances.
+       display        - 0 to 2. 0 least verbose, 2 max verbose.
+       init           - {'pca', 'cmdscale', random', 'default'}
+                        default is 'pca' if input is 'raw', 
+                        'msdcale' if input is 'distance'
+    The default options are retrieved by calling sammon(x) with no
+    parameters.
+    File        : sammon.py
+    Date        : 18 April 2014
+    Authors     : Tom J. Pollard (tom.pollard.11@ucl.ac.uk)
+                : Ported from MATLAB implementation by 
+                  Gavin C. Cawley and Nicola L. C. Talbot
+    Description : Simple python implementation of Sammon's non-linear
+                  mapping algorithm [1].
+    References  : [1] Sammon, John W. Jr., "A Nonlinear Mapping for Data
+                  Structure Analysis", IEEE Transactions on Computers,
+                  vol. C-18, no. 5, pp 401-409, May 1969.
+    Copyright   : (c) Dr Gavin C. Cawley, November 2007.
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+    """
+
+    # Create distance matrix unless given by parameters
+    if inputdist == 'distance':
+        D = x
+        if init == 'default':
+            init = 'cmdscale'
+    else:
+        D = cdist(x, x)
+        if init == 'default':
+            init = 'pca'
+
+    if inputdist == 'distance' and init == 'pca':
+        raise ValueError("Cannot use init == 'pca' when inputdist == 'distance'")
+
+    if np.count_nonzero(np.diagonal(D)) > 0:
+        raise ValueError("The diagonal of the dissimilarity matrix must be zero")
+
+    # Remaining initialisation
+    N = x.shape[0]
+    scale = 0.5 / D.sum()
+    D = D + np.eye(N)     
+
+    if np.count_nonzero(D<=0) > 0:
+        raise ValueError("Off-diagonal dissimilarities must be strictly positive")   
+
+    Dinv = 1 / D
+    if init == 'pca':
+        [UU,DD,_] = np.linalg.svd(x)
+        y = UU[:,:n]*DD[:n] 
+    elif init == 'cmdscale':
+        y,e = cmdscale(D)
+        y = y[:,:n]
+    else:
+        y = np.random.normal(0.0,1.0,[N,n])
+    one = np.ones([N,n])
+    d = cdist(y,y) + np.eye(N)
+    dinv = 1. / d
+    delta = D-d 
+    E = ((delta**2)*Dinv).sum() 
+
+    # Get on with it
+    for i in range(maxiter):
+
+        # Compute gradient, Hessian and search direction (note it is actually
+        # 1/4 of the gradient and Hessian, but the step size is just the ratio
+        # of the gradient and the diagonal of the Hessian so it doesn't
+        # matter).
+        delta = dinv - Dinv
+        deltaone = np.dot(delta,one)
+        g = np.dot(delta,y) - (y * deltaone)
+        dinv3 = dinv ** 3
+        y2 = y ** 2
+        H = np.dot(dinv3,y2) - deltaone - np.dot(2,y) * np.dot(dinv3,y) + y2 * np.dot(dinv3,one)
+        s = -g.flatten(order='F') / np.abs(H.flatten(order='F'))
+        y_old    = y
+
+        # Use step-halving procedure to ensure progress is made
+        for j in range(maxhalves):
+            s_reshape = np.reshape(s, (-1,n),order='F')
+            y = y_old + s_reshape
+            d = cdist(y, y) + np.eye(N)
+            dinv = 1 / d
+            delta = D - d
+            E_new = ((delta**2)*Dinv).sum()
+            if E_new < E:
+                break
+            else:
+                s = 0.5*s
+
+        # Bomb out if too many halving steps are required
+        if j == maxhalves-1:
+            print('Warning: maxhalves exceeded. Sammon mapping may not converge...')
+
+        # Evaluate termination criterion
+        if abs((E - E_new) / E) < tolfun:
+            if display:
+                print('TolFun exceeded: Optimisation terminated')
+            break
+
+        # Report progress
+        E = E_new
+        if display > 1:
+            print('epoch = %d : E = %12.10f'% (i+1, E * scale))
+
+    if i == maxiter-1:
+        print('Warning: maxiter exceeded. Sammon mapping may not have converged...')
+
+    # Fiddle stress to match the original Sammon paper
+    E = E * scale
+    
+    return [y,E]
 
 
 
