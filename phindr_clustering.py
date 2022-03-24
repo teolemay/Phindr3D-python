@@ -949,7 +949,7 @@ def preferenceRange(s, method='bound'):
         pmax = np.max(S)
     return pmin, pmax
 
-#   computeClustering.m
+# computeClustering.m
 def computeClustering(data, numberClusters, type='AP', sparse=False, maxits=500, convits=15, dampfact=0.5, plot=False, details=False, nonoise=False):
     print('ran')
     type = type.upper()
@@ -964,8 +964,9 @@ def computeClustering(data, numberClusters, type='AP', sparse=False, maxits=500,
         clusterResult = np.arange(0, data.shape[0])
     return clusterResult
 
-def cmdscale(D):
 
+#SAMMON MAPPING FUNCTION (not used)
+def cmdscale(D):
     #copied from https://github.com/tompollard/sammon as no other python libraries appear to have implemented sammon mapping.
 
     """                                                                                       
@@ -1013,8 +1014,8 @@ def cmdscale(D):
  
     return Y, evals[evals > 0]
    
-def sammon(x, n, display = 2, inputdist = 'raw', maxhalves = 20, maxiter = 500, tolfun = 1e-9, init = 'default'):
 
+def sammon(x, n, display = 0, inputdist = 'raw', maxhalves = 20, maxiter = 500, tolfun = 1e-9, init = 'default'):
     #copied from https://github.com/tompollard/sammon as no other python libraries appear to have implemented sammon mapping.
 
     from scipy.spatial.distance import cdist
