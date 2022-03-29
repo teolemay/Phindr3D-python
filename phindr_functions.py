@@ -42,6 +42,7 @@ VERY POSSIBLY, I SHOULD USE DICTIONARIES / ORDERED DICTIONARIESTO REPLACE THE "C
 ALSO POSSIBLE THAT ALL THE THINGS CURRENTLY SET AS CLASSES (PARAM, PAR, C) SHOULD ALSO BE REPLACED WITH DICTIONARIES
 """
 
+from tkinter import N
 from turtle import tiltangle
 import numpy as np
 from numpy.core.fromnumeric import size
@@ -408,7 +409,7 @@ def extractImageLevelTextureFeatures(mData, allImageId, param, outputFileName='i
     if useTreatment:
         dictResults['treatment'] = Treatments
     else:
-        dictResults['Treatment'] = np.full((len(uniqueImageID), ), 'N/A', dtype='object')
+        dictResults['Treatment'] = np.full((len(uniqueImageID), ), 'RR', dtype='object')
     dictResults['numMV'] = numRawMV
     for i in range(resultIM.shape[1]):
         mvlabel = f'MV{i+1}'
@@ -851,6 +852,38 @@ def getMegaVoxelBinCenters(mData, allImageId, param):
         else:
             MegaVoxelsforTraining = np.concatenate((MegaVoxelsforTraining, megaVoxelProfile[fgMegaVoxel]))
     param.megaVoxelBincenters = getPixelBins(MegaVoxelsforTraining, param.numMegaVoxelBins)
+    if param.showBincenters:
+        from phindr_clustering import sammon
+        try:
+            S, E = sammon(MegaVoxelsforTraining, 2)
+            sam=True
+        except ValueError:
+            sam = False
+            from sklearn.decomposition import KernelPCA
+            pca = KernelPCA(n_components=2, kernel='rbf')
+            S = pca.fit(MegaVoxelsforTraining).transform(MegaVoxelsforTraining)
+        fig = plt.figure()
+        ax = fig.add_subplot()
+        ax.set_title('Training mega-voxel distribution and bin centers')
+        ax.scatter(S[:, 0], S[:, 1], color='tab:blue', label='Training mega-voxels')
+        if sam:
+            from scipy.spatial.distance import cdist
+            for i in range(param.megaVoxelBincenters.shape[0]):
+                closest_index = np.argmin(cdist(MegaVoxelsforTraining, np.atleast_2d(param.megaVoxelBincenters[i])))
+                if i == 0:
+                    ax.scatter(S[closest_index, 0], S[closest_index, 1], color='r', label='Approx. mega voxel bin centers')
+                else:
+                    ax.scatter(S[closest_index, 0], S[closest_index, 1], color='r')
+                ax.text(S[closest_index, 0], S[closest_index, 1], f'{i+1}', zorder=1, color='k')
+        else:
+            bc = pca.transform(param.megaVoxelBincenters)
+            ax.scatter(bc[:, 0], bc[:, 1], color='r', label='Bin centers')
+            for i in range(param.megaVoxelBincenters.shape[0]):
+                ax.text(bc[i, 0], bc[i, 1], f'{i+1}', zorder=1, color='k')
+        ax.legend()
+        ax.set_xlabel('PCA 1')
+        ax.set_ylabel('PCA 2')
+        plt.show()
     return param
 
 #   getMegaVoxelProfile.m
@@ -993,6 +1026,62 @@ def getPixelBinCenters(mData, allImageId, param):
         endVal += iTmp.shape[0]
     pixelsForTraining = pixelsForTraining[np.sum(pixelsForTraining, axis=1) > 0, :] #this step gets rid of background pixels AND all the extra zeros left over at the end.
     param.pixelBinCenters = getPixelBins(pixelsForTraining, param.numVoxelBins)
+    if param.showBincenters:
+        if param.numChannels == 3:#should be 3. changed here to test something #3d projection, otherwise back to sammon mapping.
+            fig = plt.figure()
+            ax = fig.add_subplot(projection = '3d')
+            ax.set_title('Training voxel distribution')
+            ch1 = pixelsForTraining[:, 0]
+            ch2 = pixelsForTraining[:, 1]
+            ch3 = pixelsForTraining[:, 2]
+            ax.scatter(ch1, ch2, ch3)
+            ax.set_xlabel('Channel 1 intensity')
+            ax.set_ylabel('Channel 2 intensity')
+            ax.set_zlabel('Channel 3 intensity')
+
+            fig2 = plt.figure()
+            ax2 = fig2.add_subplot(projection = '3d')
+            ax2.set_title('Voxel bin center distribution')
+            ch1 = param.pixelBinCenters[:, 0]
+            ch2 = param.pixelBinCenters[:, 1]
+            ch3 = param.pixelBinCenters[:, 2]
+            for i in range(len(param.pixelBinCenters)):
+                ax2.scatter(ch1[i], ch2[i], ch3[i])
+                ax2.text(ch1[i], ch2[i], ch3[i], f'{i+1}', zorder=1,  color='k')
+            ax2.set_xlabel('Channel 1 intensity')
+            ax2.set_ylabel('Channel 2 intensity')
+            ax2.set_zlabel('Channel 3 intensity')
+            plt.show()
+        else:
+            from phindr_clustering import sammon
+            try:
+                S, E = sammon(pixelsForTraining, 2)
+                sam=True
+            except ValueError:
+                sam=False
+                from sklearn.decomposition import KernelPCA
+                pca = KernelPCA(n_components=2, kernel='rbf')
+                S = pca.fit(pixelsForTraining).transform(pixelsForTraining)
+                print(S.shape)
+            fig = plt.figure()
+            ax = fig.add_subplot()
+            ax.set_title('Training Voxel distribution and bin centers')
+            ax.scatter(S[:, 0], S[:, 1], color='tab:blue', label='Training Voxels')
+            if sam:
+                from scipy.spatial.distance import cdist
+                for i in range(param.supervoxelBincenters.shape[0]):
+                    closest_index = np.argmin(cdist(pixelsForTraining, np.atleast_2d(param.pixelBinCenters[i])))
+                    ax.scatter(S[closest_index, 0], S[closest_index, 1], color='r')
+                    ax.text(S[closest_index, 0], S[closest_index, 1], f'{i+1}', zorder=1, color='k')
+            else:
+                bc = pca.transform(param.pixxelBinCenters)
+                ax.scatter(bc[:, 0], bc[:, 1], color='r', label='Bin centers')
+                for i in range(param.pixelBinCenters.shape[0]):
+                    ax.text(bc[i, 0], bc[i, 1], f'{i+1}', zorder=1, color='k')
+            ax.legend()
+            ax.set_xlabel('PCA 1')
+            ax.set_ylabel('PCA 2')
+            plt.show()
     return param
 
 #   getPixelBins.m
@@ -1012,7 +1101,7 @@ def getPixelBins(x, numBins):
     % binCenters - (numBins+1) x n (The first centroid are zeros- indicating background)
 
     % numBins = param.numVoxelBins;
-    % Use kmeans clustering to get  (looks like it is using kmeans++ algorithm) # use sklearn kmeans (gives same results as matlab wit henough repeats!)
+    % Use kmeans clustering to get  (looks like it is using kmeans++ algorithm) # use sklearn kmeans (gives same results as matlab with enough repeats!)
     """
     m = x.shape[0]
     if m > 50000:
@@ -1025,7 +1114,7 @@ def getPixelBins(x, numBins):
         sumD = np.zeros(numRandRpt)
         for iRandCycle in range(0, numRandRpt):
             randpermX = np.array([x[j] for j in Generator.choice(m, size=samSize, replace=False, shuffle=False)  ])
-            kmeans = cluster.KMeans(n_clusters=numBins, n_init=100, max_iter=100).fit(randpermX)
+            kmeans = cluster.KMeans(n_clusters=numBins, n_init=100, max_iter=500).fit(randpermX) #max_iter used to be 100. changed because bin-centers don't always match up to real values.
             binCenters[:, :, iRandCycle] = kmeans.cluster_centers_
             temp1 = np.add(np.array([mat_dot(binCenters[:, :, numRandRpt-1], binCenters[:, :, numRandRpt-1], axis=1)]).T, mat_dot(x, x, axis=1)).T #still not sure which one of this or the next should be transposed
             temp2 = 2*(x @ binCenters[:, :, numRandRpt-1].T)
@@ -1034,7 +1123,7 @@ def getPixelBins(x, numBins):
         minDis = np.argmin(sumD)
         binCenters = binCenters[:, :, minDis]
     else: 
-        kmeans = cluster.KMeans(n_clusters=numBins, n_init=100, max_iter=100).fit(x)
+        kmeans = cluster.KMeans(n_clusters=numBins, n_init=100, max_iter=500).fit(x) #max iter used to be 100
         binCenters = kmeans.cluster_centers_ 
     return np.abs(binCenters)
 
@@ -1132,6 +1221,51 @@ def getSuperVoxelBinCenters(mData, allImageId, param):
     if len(tilesForTraining) == 0:
         print('\nNo foreground super-voxels found. consider changing parameters')
     param.supervoxelBincenters = getPixelBins(tilesForTraining, param.numSuperVoxelBins)
+    if param.showBincenters:
+        from phindr_clustering import sammon
+        try:
+            S, E = sammon(tilesForTraining, 2)
+            sam=True
+        except ValueError:
+            sam=False
+            from sklearn.decomposition import KernelPCA
+            pca = KernelPCA(n_components=3, kernel='rbf')
+            S = pca.fit(tilesForTraining).transform(tilesForTraining)
+        if sam:
+            fig = plt.figure()
+            ax = fig.add_subplot()
+            ax.set_title('Training super-voxel distribution and bin centers')
+            ax.scatter(S[:, 0], S[:, 1], color='tab:blue', label='Training super voxels')
+            from scipy.spatial.distance import cdist
+            for i in range(param.supervoxelBincenters.shape[0]):
+                closest_index = np.argmin(cdist(tilesForTraining, np.atleast_2d(param.supervoxelBincenters[i])))
+                ax.scatter(S[closest_index, 0], S[closest_index, 1], color='r')
+                ax.text(S[closest_index, 0], S[closest_index, 1], f'{i+1}', zorder=1, color='k')
+        else:
+            fig = plt.figure()
+            ax = fig.add_subplot(projection='3d')
+            ax.set_title('Training super-voxel distribution')
+            ax.scatter(S[:, 0], S[:, 1], S[:, 2], color='tab:blue', label='Training super voxels')
+            ax.set_zlabel('PCA 3')
+
+            fig2 = plt.figure()
+            ax2 = fig2.add_subplot(projection='3d')
+            ax2.set_title('Super voxel bin centers')
+            bc = pca.transform(param.supervoxelBincenters)
+            bc1 = bc[:, 0]
+            bc2 = bc[:, 1]
+            bc3 = bc[:, 2]
+            for i in range(param.supervoxelBincenters.shape[0]):
+                ax2.scatter(bc1[i], bc2[i], bc3[i])
+                ax2.text(bc1[i], bc2[i], bc3[i], f'{i+1}', zorder=1, color='k')
+            ax2.set_xlabel('PCA 1')
+            ax2.set_ylabel('PCA 2')
+            ax2.set_zlabel('PCA 3')
+
+        ax.legend()
+        ax.set_xlabel('PCA 1')
+        ax.set_ylabel('PCA 2')
+        plt.show()
     return param
 
 #   getTileInfo.m
