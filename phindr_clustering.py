@@ -391,14 +391,14 @@ def apclusterK(s, kk, prc=10):
     if dpsim1 == -np.inf:
         print('error, could not find pmin')
         return None
-    elif N>1000:
+    elif N>10000:
         for k in range(N):
             S[k,k] = -np.inf
         m = np.amax(S, axis=1)
         tmp = np.sum(m)
         yy = np.amin(m, axis=0)
         ii = np.argmin(m, axis=0)
-        tmp = tmp - yy - np.min(m[:ii[1]+1, ii[1]+1:N])
+        tmp = tmp - yy - np.min(m[:ii, ii:N])
         pmin = dpsim1-tmp
     else:
         dpsim2 = -np.inf
@@ -1013,9 +1013,23 @@ def cmdscale(D):
     Y  = V.dot(L)
  
     return Y, evals[evals > 0]
-   
 
-def sammon(x, n, display = 0, inputdist = 'raw', maxhalves = 20, maxiter = 500, tolfun = 1e-9, init = 'default'):
+   
+def rescale(x, newmin=0, newmax=1):
+    """
+    This function linearly rescales an array to the range [newmin, newmax]
+    :param x:, numpy array, to be rescaled
+    :param newmin: float, minimum value in new range
+    :param newmax: float, maximum value in new range
+    
+    :return: x rescaled.
+    """
+    minx = np.min(x)
+    maxx = np.max(x)
+    return (x-minx)/(maxx - minx)*(newmax-newmin) + newmin
+
+
+def sammon(x, n, display = 0, inputdist = 'raw', maxhalves = 20, maxiter = 1000, tolfun = 1e-9, init = 'default'):
     #copied from https://github.com/tompollard/sammon as no other python libraries appear to have implemented sammon mapping.
 
     from scipy.spatial.distance import cdist
@@ -1068,6 +1082,8 @@ def sammon(x, n, display = 0, inputdist = 'raw', maxhalves = 20, maxiter = 500, 
     """
 
     # Create distance matrix unless given by parameters
+    if x.shape[0] > 10000:
+        raise ValueError("should be a memory error actually: input array too big, would cause memory error")
     if inputdist == 'distance':
         D = x
         if init == 'default':
