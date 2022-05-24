@@ -660,10 +660,13 @@ def getImageProfile(megaVoxelProfile, fgMegaVoxel, param, imagename):
             plt.figure()
             title = f'{imagename} megavoxel image'
             plt.title(title)
-            plt.imshow(mv_show[i, :, :], param.mvcolormap)
+            plt.imshow(mv_show[i, :, :], param.mvcolormap)  ###################correct one
+            # plt.imshow(mv_show[i, :, :], 'viridis') ############# viridis to compare with matlab easier.
             plt.colorbar()
             plt.show()
-    if param.textureFeatures: ###########lets put this here.
+            # np.savetxt(r'C:\Users\teole\anaconda3\envs\phy479\pytmvim.csv', mv_show[i, :, :], delimiter=',') ################ pixel pixel comparisons
+
+    if param.textureFeatures: ###########lets put this here. 
         mv_image = np.reshape(x, (param.numMegaVoxelZ, param.numMegaVoxelX, param.numMegaVoxelY))
         total_mean_textures = np.full((param.numMegaVoxelZ, 4), np.nan)
         for i in range(mv_image.shape[0]):
@@ -772,7 +775,7 @@ def getImageWithSVMVOverlay(IM, param, type):
 def getIndividualChannelThreshold(filenames, param, ii=None):
     """called in getImageThresholdValues""" 
     slicekeys = list(filenames.keys())
-    channelkeys = list(filenames[slicekeys[0]].keys()) #this is probably the issue
+    channelkeys = sorted(list(filenames[slicekeys[0]].keys())) 
     numberChannels = len(channelkeys)
     thresh = np.zeros((len(slicekeys), numberChannels))
     if ii == None:
@@ -781,7 +784,7 @@ def getIndividualChannelThreshold(filenames, param, ii=None):
         grpVal = np.argwhere(param.allTreatments == param.imageTreatments[ii])
     for iImages in range(0, len(slicekeys)):
         for iChannels in range(0, numberChannels):
-            IM = io.imread(filenames[slicekeys[iImages]][iChannels+1]) #used to bechannelkeys[iChannels]
+            IM = io.imread(filenames[slicekeys[iImages]][channelkeys[iChannels]]) #used to bechannelkeys[iChannels]
             xEnd = -param.xOffsetEnd
             if xEnd == -0:
                 xEnd = None   #if the end index is -0, you just index from 1 to behind 1 and get an empty array. change to 0 if the dimOffsetEnd value is 0.
@@ -856,6 +859,7 @@ def getIndividualChannelThreshold(filenames, param, ii=None):
 #     allData = [allFeaturesInt, allFeatures]
 #     return allHeader, allData
 
+#never used
 #   getMIPImage.m
 def getMIPImage(imfiles):
     """called in getIntensityFeatures"""
@@ -953,9 +957,12 @@ def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param, imagename):
             plt.figure()
             title = f'{imagename} Super-voxel image'
             plt.title(title)
-            plt.imshow(x[i, :, :], param.svcolormap)
+            plt.imshow(x[i, :, :], param.svcolormap) ##############################This is the correct one
+            # plt.imshow(x[i, :, :], 'viridis') #########viridis to compare to matlab map
             plt.colorbar()
             plt.show()
+            # np.savetxt(r'C:\Users\teole\anaconda3\envs\phy479\pytsvim.csv', x[i, :, :], delimiter=',') ################ pixel pixel comparisons
+
     #pad first dimension 
     x = np.concatenate([ np.zeros((param.superVoxelZAddStart, x.shape[1], x.shape[2])), x, np.zeros((param.superVoxelZAddEnd, x.shape[1], x.shape[2])) ], axis=0) #new (z, x, y) shape
     # x = np.concatenate([ np.zeros((param.superVoxelXAddStart, x.shape[1], x.shape[2])), x, np.zeros((param.superVoxelXAddEnd, x.shape[1], x.shape[2])) ], axis=0) #for old (x, y, z) shape
@@ -1005,6 +1012,7 @@ def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param, imagename):
     fgMegaVoxel = fgMegaVoxel.astype(bool) 
     return megaVoxelProfile, fgMegaVoxel
 
+# Never used
 #   getMerged3DImage.m
 def getMerged3DImage(filenames, colors, boundValues, thresholdValues):
     #this function makes a distinction about whether filenames is a matlab cell array or not.
@@ -1073,8 +1081,10 @@ def getPixelBinCenters(mData, allImageId, param):
         pixelsForTraining[startVal:endVal+iTmp.shape[0], :] = iTmp #add to list.
         startVal += iTmp.shape[0]
         endVal += iTmp.shape[0]
-    pixelsForTraining = pixelsForTraining[np.sum(pixelsForTraining, axis=1) > 0, :] #this step gets rid of background pixels AND all the extra zeros left over at the end.
-    param.pixelBinCenters = getPixelBins(pixelsForTraining, param.numVoxelBins)
+    pixelsForTraining = pixelsForTraining[np.sum(pixelsForTraining, axis=1) > 0, :] #this step gets rid of trailing zeros left over at the end.
+    param.pixelBinCenters = getPixelBins(pixelsForTraining, param.numVoxelBins) 
+    ## end of function. everything between here and return is to show the bincenters. ## 
+
     if param.showBincenters:
         if param.numChannels == 3:#should be 3. changed here to test something #3d projection, otherwise back to sammon mapping.
             fig = plt.figure()
@@ -1163,7 +1173,7 @@ def getPixelBins(x, numBins):
         sumD = np.zeros(numRandRpt)
         for iRandCycle in range(0, numRandRpt):
             randpermX = np.array([x[j] for j in Generator.choice(m, size=samSize, replace=False, shuffle=False)  ])
-            kmeans = cluster.KMeans(n_clusters=numBins, n_init=100, max_iter=500).fit(randpermX) #max_iter used to be 100. changed because bin-centers don't always match up to real values.
+            kmeans = cluster.KMeans(n_clusters=numBins, init='k-means++', n_init=100, max_iter=100).fit(randpermX) #max_iter used to be 100. changed because bin-centers don't always match up to real values.
             binCenters[:, :, iRandCycle] = kmeans.cluster_centers_
             temp1 = np.add(np.array([mat_dot(binCenters[:, :, numRandRpt-1], binCenters[:, :, numRandRpt-1], axis=1)]).T, mat_dot(x, x, axis=1)).T #still not sure which one of this or the next should be transposed
             temp2 = 2*(x @ binCenters[:, :, numRandRpt-1].T)
@@ -1172,7 +1182,7 @@ def getPixelBins(x, numBins):
         minDis = np.argmin(sumD)
         binCenters = binCenters[:, :, minDis]
     else: 
-        kmeans = cluster.KMeans(n_clusters=numBins, n_init=100, max_iter=500).fit(x) #max iter used to be 100
+        kmeans = cluster.KMeans(n_clusters=numBins, init='k-means++', n_init=100, max_iter=100).fit(x) #max iter used to be 100
         binCenters = kmeans.cluster_centers_ 
     return np.abs(binCenters)
 
@@ -1183,7 +1193,6 @@ def getScalingFactorforImages(metadata, allImageID, param):
     param: structure of parameter value
     metadata: Metadata
 
-    ### SHOULD MOSTLY WORK, THE INTENSITYNORMPERGTREATMENT AND GRP VAL THINGS ARE NOT YET PROPERLY EXAMINED.
     """
     if param.intensityNormPerTreatment:
         randFieldIDforNormalization, treatmentVals = getTrainingFields(metadata, param, allImageID, param.treatmentColNameForNormalization) #choose images for scaling
@@ -1206,15 +1215,18 @@ def getScalingFactorforImages(metadata, allImageID, param):
         d[2] = len(filenames) #number of z stacks
         param = getTileInfo(d, param) 
         randZ = int(d[2]//2 )
+        #### HERE CHANGE BACK
         randZ = Generator.choice(int(d[2]), size=randZ, replace=False, shuffle=False) #choose half of the stack, randomly
+
         randfilenames = [filenames[slices[i]] for i in randZ] #list of dicts [{chan1:'path', ...}, {chan1:'path', ...}, ...] in random order. this has the slices chosen by randZ
         minVal = np.full((len(randfilenames), param.numChannels), np.inf)
         maxVal = np.full((len(randfilenames), param.numChannels), -1*np.inf)
+        channelkeys = sorted(list(randfilenames[0].keys()))
         for j in range(0, len(randfilenames)): 
-            for k in range(0, param.numChannels): #channel dictionary keys are integers starting from 1, going to param.numChannels (Inclusive)
-                IM = io.imread(randfilenames[j][k+1]) 
+            for k in range(0, param.numChannels):
+                IM = io.imread(randfilenames[j][channelkeys[k]]) 
                 minVal[j, k] = np.quantile(IM, 0.01)
-                # minVal[j, k] = min(minVal[j, k], np.quantile(IM, 0.01)) #dont really need the min and max thins there, we already know which one it will end up being.
+                # minVal[j, k] = min(minVal[j, k], np.quantile(IM, 0.01)) #dont really need the min and max thins there, we already know which one it will end up being since the prev val is inf or -inf.
                 maxVal[j, k] = np.quantile(IM, 0.99)
                 # maxVal[j, k] = max(maxVal[j, k], np.quantile(IM, 0.99))
         minChannel[i, :] = np.amin(minVal, axis=0)
@@ -1451,6 +1463,8 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
     % filenames - Image file names images x numchannels
     % pixelBinCenters - Location of pixel categories: number of bins x number
     % of channels
+    param: parameter object
+    ii: current image id
     % Output:
     % superVoxelProfile: number of supervoxels by number of supervoxelbins plus
     % a background
@@ -1463,6 +1477,7 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
     if zEnd == -0:
         zEnd = None
     slices = sorted(list(filenames.keys())) 
+    channelkeys = sorted(list(filenames[slices[0]].keys()))
     slices = slices[param.zOffsetStart:zEnd] #keep z stacks that are divisible by stack count
     sliceCounter = 0
     startVal = 0
@@ -1474,6 +1489,7 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
         grpVal = np.argwhere(param.allTreatments == param.imageTreatments[ii])
     superVoxelProfile = np.zeros((param.numSuperVoxels, param.numVoxelBins+1))
     fgSuperVoxel = np.zeros(param.numSuperVoxels)
+    # correct shape here.
     if param.computeTAS:
         categoricalImage = np.zeros((param.croppedX, param.croppedY, param.croppedZ))
     #loop over file names and extract super voxels
@@ -1485,9 +1501,9 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
         for jChannels in range(0, param.numChannels):
             try:
                 if param.intensityNormPerTreatment:
-                    croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[zslice][jChannels+1], param.fmt), low=param.lowerbound[grpVal, jChannels], high=param.upperbound[grpVal, jChannels])
+                    croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[zslice][channelkeys[jChannels]], param.fmt), low=param.lowerbound[grpVal, jChannels], high=param.upperbound[grpVal, jChannels])
                 else:
-                    croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[zslice][jChannels+1], param.fmt), low=param.lowerbound[jChannels], high=param.upperbound[jChannels])
+                    croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[zslice][channelkeys[jChannels]], param.fmt), low=param.lowerbound[jChannels], high=param.upperbound[jChannels])
             except Exception as e:
                 print(e)
                 print('Error: file ->', filenames[zslice][jChannels+1])
@@ -1511,19 +1527,22 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
                 plt.figure()
                 title = f'{ii} slice {zslice}'
                 plt.title(title)
-                plt.imshow(croppedIM) #leaving it in multichannel gives rgb correctly for 3 channel image. WILL Fail for numChannel
+                plt.imshow(croppedIM) #leaving it in multichannel gives rgb correctly for 3 channel image. WILL Fail for numChannel != 3
             plt.show()
-        x = np.reshape(croppedIM, (param.croppedX*param.croppedY, param.numChannels)) #flatten image, keeping channel dimension separate
+        x = np.reshape(croppedIM, (param.croppedX*param.croppedY, param.numChannels)) #flatten image, keeping channel dimension separate   
         fg = np.sum(x > param.intensityThreshold, axis=1) >= 1 #want to be greater than threshold in at least 1 channel
         pixelCategory = np.argmin(np.add(param.pixelBinCenterDifferences, mat_dot(x[fg,:], x[fg,:], axis=1)).T - 2*(x[fg,:] @ pixelBinCenters.T), axis=1) + 1
         x = np.zeros(param.croppedX*param.croppedY, dtype='uint8')
         x[fg] = pixelCategory #assign voxel bin categories to the flattened array
+
+        ## uncomment for testing if needed.
+        # x_show = np.reshape(x, (param.croppedX, param.croppedY))
+        # np.savetxt(r'C:\Users\teole\anaconda3\envs\phy479\pytvoxelim.csv', x_show, delimiter=',')
+
+
         #here, x can be reshaped to croppedX by croppedY and will give the map of pixel assignments for the image slice
         if param.computeTAS:
             categoricalImage[:, :, iImages] = np.reshape(x, param.croppedX, param.croppedY)
-        tmpData[:, startCol:endCol] = im2col(np.reshape(x, (param.croppedX, param.croppedY)), (param.tileX, param.tileY)).T
-        startCol += (param.tileX*param.tileY)
-        endCol += (param.tileX*param.tileY)
         # del fg, croppedIM, pixelCategory #not 100 on why to delete al here since things would just be overwritten anyway, but why not right, also, some of the variables to clear where already commented out so I removed them from the list
         if sliceCounter == param.tileZ:
             #add the tmpData that has been accumulating for the past  to the fgsupervoxel
@@ -1537,6 +1556,10 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
             startCol = 0
             endCol = param.tileX*param.tileY
             tmpData = np.zeros((numTilesXY, param.tileX*param.tileY*param.tileZ))
+        else:
+            tmpData[:, startCol:endCol] = im2col(np.reshape(x, (param.croppedX, param.croppedY)), (param.tileX, param.tileY)).T
+            startCol += (param.tileX*param.tileY)
+            endCol += (param.tileX*param.tileY)
     if not param.countBackground:
         superVoxelProfile = superVoxelProfile[:, 1:]
     superVoxelProfile = np.divide(superVoxelProfile, np.array([np.sum(superVoxelProfile, axis=1)]).T) #dont worry about divide by zero errors, they are supposed to happen here!
@@ -1589,43 +1612,44 @@ def getTrainingPixels(filenames, param, ii):
     param is param file
     ii is the image ID for the image that was passed in.
     """
-    zslices = list(filenames.values()) #z slices
-    channelkeys = list(zslices[0].keys()) #channels
-    zslices = np.array([zslices[i] for i in Generator.choice(len(zslices), size=param.randZForTraining, replace=False, shuffle=False)]) #shuffle the slices
+    slices = sorted(list(filenames.keys()))
+    channelkeys = sorted(list(filenames[slices[0]].keys())) #channels
+    #uncomment this row for proper function.
+    # slices = np.array([slices[i] for i in Generator.choice(len(slices), size=param.randZForTraining, replace=False, shuffle=False)]) #shuffle the slices
     trPixels = np.zeros((param.pixelsPerImage*param.randZForTraining, param.numChannels))
     startVal = 0
     if param.intensityNormPerTreatment:
         grpVal = np.argwhere(param.allTreatments == param.imageTreatments[ii])
-    zslices = zslices[:(len(zslices)//2)]
-    for iImages in range(0, len(zslices)):
-        ####absolutely no point to crop any of these. background pixels get filtered out here anyway. worry about cropping later when super and megavoxels come into play.
-            ####below used to be the cropped image setup. didnt work because different images/zslices might have different shapes
-        # croppedIM = np.zeros((param.origX, param.origY, param.numChannels))
-        if param.intensityNormPerTreatment:
-            im0 = rescaleIntensity(io.imread(zslices[iImages][1], param.fmt), low=param.lowerbound[grpVal, 0], high=param.upperbound[grpVal, 0])
-        else:
-            im0 = rescaleIntensity(io.imread(zslices[iImages][1], param.fmt), low=param.lowerbound[0], high=param.upperbound[0])
-        croppedIM = np.zeros((im0.size, param.numChannels))
-        croppedIM[:, 0] = np.ravel(im0) #load things pre-flattened since there is no point to cropping here yet.
-        for jChannels in range(1, param.numChannels):
+    slices = slices[0:(len(slices)//2)] ###################### revert by removing the :3]#
+    for zplane in slices:
+        croppedIM = np.zeros((param.origX, param.origY, param.numChannels))
+        ######These lines were in place because of false assumptions due to being sent maximum intensity images insteado of 3D images.
+            ## Should work, but skips the image cropping step.
+        # if param.intensityNormPerTreatment:
+        #     im0 = rescaleIntensity(io.imread(zslices[iImages][1], param.fmt), low=param.lowerbound[grpVal, 0], high=param.upperbound[grpVal, 0])
+        # else:
+        #     im0 = rescaleIntensity(io.imread(zslices[iImages][1], param.fmt), low=param.lowerbound[0], high=param.upperbound[0])
+        # croppedIM = np.zeros((im0.size, param.numChannels))
+        # croppedIM[:, 0] = np.ravel(im0) #load things pre-flattened since there is no point to cropping here yet.
+        for jChannels in range(0, param.numChannels):
+            ############## same here as last comment above.
+            # if param.intensityNormPerTreatment:
+            #     croppedIM[:, jChannels] = np.ravel(rescaleIntensity(io.imread(zslices[iImages][jChannels+1], param.fmt), low=param.lowerbound[grpVal, jChannels], high=param.upperbound[grpVal, jChannels]))
+            # else:
+            #     croppedIM[:, jChannels] = np.ravel(rescaleIntensity(io.imread(zslices[iImages][jChannels+1], param.fmt), low=param.lowerbound[jChannels], high=param.upperbound[jChannels]))
             if param.intensityNormPerTreatment:
-                croppedIM[:, jChannels] = np.ravel(rescaleIntensity(io.imread(zslices[iImages][jChannels+1], param.fmt), low=param.lowerbound[grpVal, jChannels], high=param.upperbound[grpVal, jChannels]))
+                croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[zplane][channelkeys[jChannels]], param.fmt), low=param.lowerbound[grpVal, jChannels], high=param.upperbound[grpVal, jChannels])
             else:
-                croppedIM[:, jChannels] = np.ravel(rescaleIntensity(io.imread(zslices[iImages][jChannels+1], param.fmt), low=param.lowerbound[jChannels], high=param.upperbound[jChannels]))
-            ####below was nice convenient file loading into 3 channel image.
-        #     if param.intensityNormPerTreatment:
-        #         croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(zslices[iImages][channelkeys[jChannels]], param.fmt), low=param.lowerbound[grpVal, jChannels], high=param.upperbound[grpVal, jChannels])
-        #     else:
-        #         croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(zslices[iImages][channelkeys[jChannels]], param.fmt), low=param.lowerbound[jChannels], high=param.upperbound[jChannels])
-            ####below was image cropping.
-        # xEnd = -param.xOffsetEnd
-        # if xEnd == -0:
-        #     xEnd = None   #if the end index is -0, you just index from 1 to behind 1 and get an empty array. change to 0 if the dimOffsetEnd value is 0.
-        # yEnd = -param.yOffsetEnd
-        # if yEnd == -0:
-        #     yEnd = None
-        # croppedIM = croppedIM[param.xOffsetStart:xEnd, param.yOffsetStart:yEnd, :] #crop
-        # croppedIM = np.reshape(croppedIM, (param.croppedX*param.croppedY, param.numChannels)) #flatten
+                croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[zplane][channelkeys[jChannels]], param.fmt), low=param.lowerbound[jChannels], high=param.upperbound[jChannels])
+        #crop parameters
+        xEnd = -param.xOffsetEnd
+        if xEnd == -0:
+            xEnd = None   #if the end index is -0, you just index from 1 to behind 1 and get an empty array. change to 0 if the dimOffsetEnd value is 0.
+        yEnd = -param.yOffsetEnd
+        if yEnd == -0:
+            yEnd = None
+        croppedIM = croppedIM[param.xOffsetStart:xEnd, param.yOffsetStart:yEnd, :] #crop
+        croppedIM = np.reshape(croppedIM, (param.croppedX*param.croppedY, param.numChannels)) #flatten
         croppedIM = croppedIM[np.sum(croppedIM > param.intensityThreshold, axis=1) >= param.numChannels/3, :] #must be greater than threshold in at least one channel.
         croppedIM = selectPixelsbyweights(croppedIM)
         if croppedIM.shape[0] >= param.pixelsPerImage:
@@ -1729,7 +1753,8 @@ def selectPixelsbyweights(x):
     p = x[p, :]
     return p
 
-#   setImageView.m
+####  NEVER USED ############
+#   setImageView.m  
 def setImageView(imageFileNames, channelColorValue, selectedViewType, selectedChannels, axisHandle):
     """
     sets up viewing for selected images
