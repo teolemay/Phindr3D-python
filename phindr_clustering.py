@@ -370,24 +370,27 @@ def apclusterK(s, kk, prc=10):
     """
     # Construct similarity matrix and add a tiny amount of noise
     if s.shape[1] == 3:
-        N = np.maximum(np.max(s[:, 0]), np.max(s[:, 1]))
+        N = max(np.max(s[:, 0]), np.max(s[:, 1]))
         S = np.full((N, N), -np.inf)
         for j in range(s.shape[0]):
-            S[s[j, 0]] = s[j,2]
-            S[s[j, 1]] = s[j,2]
+            S[ s[j,0], s[j,1] ] = s[j, 2]
     else:
         N = s.shape[0]
         S = s.copy()
+
     rns = np.random.get_state()
     np.random.seed(0)
     S = S + (eps*S + realmin*100)*np.random.random((N,N))
     np.random.set_state(rns)
-    #assigning base, S, S
+    #assigning base, S, S 
     for k in range(N):
         S[k,k] = 0
     #find limits
+
+   
+
     dpsim1 = np.max(np.sum(S, axis=0))
-    k11 = np.unravel_index(np.argmax(np.sum(S, axis=0)), shape=np.sum(S, axis=0).shape)
+    # k11 = np.unravel_index(np.argmax(np.sum(S, axis=0)), shape=np.sum(S, axis=0).shape)
     if dpsim1 == -np.inf:
         print('error, could not find pmin')
         return None
@@ -834,6 +837,7 @@ def clsIn(data, beta=0.05, dis='euclidean'):
     """
     dis can be: "euclidean" OR "cosine" OR "hamming"
     """
+
     dis = dis.lower()
     if data.size == 0: #check if data is empty array
         print('Data is empty')
@@ -851,6 +855,11 @@ def clsIn(data, beta=0.05, dis='euclidean'):
         sim = -1*sim
     elif (dis == 'cosine') or (sim == 'hamming'):
         sim = 1 - sim
+
+    print('in clsin')
+    print(sim)
+    print()
+    
     x_x = np.tril(np.ones((sim.shape[0], sim.shape[0]), dtype=bool), -1) #lower triangular matrix True below the diagonal, false elsewhere.
     C.pmed = np.median(sim[x_x]) #i think this is the right axis, but very unsure. Should be median along rows of 2d matrix since sim[x_x] is 2d matrix however, numpy rows and cols are different than in matlab.
     C.pmin, C.pmax = preferenceRange(sim)
@@ -1029,8 +1038,9 @@ def rescale(x, newmin=0, newmax=1):
     return (x-minx)/(maxx - minx)*(newmax-newmin) + newmin
 
 
-def sammon(x, n, display = 0, inputdist = 'raw', maxhalves = 20, maxiter = 1000, tolfun = 1e-9, init = 'default'):
+def sammon(x, n, display = 0, inputdist = 'raw', maxhalves = 20, maxiter = 500, tolfun = 1e-9, init = 'default'):
     #copied from https://github.com/tompollard/sammon as no other python libraries appear to have implemented sammon mapping.
+    #this appears to be the same implementation as is used in matlab's drtoolbox.
 
     from scipy.spatial.distance import cdist
 
