@@ -420,15 +420,15 @@ def extractImageLevelTextureFeatures(mData, allImageId, param, outputFileName='i
         'ImageID':uniqueImageID
     }
     if useTreatment:
-        dictResults['treatment'] = Treatments
+        dictResults['Treatment'] = Treatments
     else:
         dictResults['Treatment'] = np.full((len(uniqueImageID), ), 'RR', dtype='object')
-    dictResults['numMV'] = numRawMV
+    dictResults['NumMV'] = numRawMV
     for i in range(resultIM.shape[1]):
         mvlabel = f'MV{i+1}'
         dictResults[mvlabel] = resultIM[:, i] #e.g. mv cat 1: for each image, put here frequency of mvs of type 1.
     if param.textureFeatures:
-        for i, name in enumerate(['ASM', 'entropy', 'info_corr1', 'infor_corr2']):
+        for i, name in enumerate(['text_ASM', 'text_entropy', 'text_info_corr1', 'text_infor_corr2']):
             dictResults[name] = textureResults[:, i]
     df = pd.DataFrame(dictResults)
     # df.dropna(inplace=True) #removed dropna
