@@ -855,16 +855,89 @@ def clsIn(data, beta=0.05, dis='euclidean'):
         sim = -1*sim
     elif (dis == 'cosine') or (sim == 'hamming'):
         sim = 1 - sim
-
-    print('in clsin')
-    print(sim)
-    print()
-    
     x_x = np.tril(np.ones((sim.shape[0], sim.shape[0]), dtype=bool), -1) #lower triangular matrix True below the diagonal, false elsewhere.
     C.pmed = np.median(sim[x_x]) #i think this is the right axis, but very unsure. Should be median along rows of 2d matrix since sim[x_x] is 2d matrix however, numpy rows and cols are different than in matlab.
     C.pmin, C.pmax = preferenceRange(sim)
     C.S = sim #similarity matrix
     return C
+
+def estimateNumClusters(X):
+    C = clsIn(X) #make similarity matrix
+    step = 100
+    pref = np.linspace(C.pmin, C.pmax, 100, endpoint=True)
+    yCls = np.zeros(pref.shape)
+    for i in range(len(pref)):
+        idx, netsim, dpsim, expref, unconverged = apcluster(C.S, pref[i], dampfact=0.9)
+        uIdx = np.unique(idx)
+        if (len(uIdx) == len(idx)) and (i<len(pref)):
+            if i == 0:
+                yCls[i] = 1
+            else:
+                yCls[i] = yCls[i-1]
+        else: 
+            yCls[i] = len(uIdx)
+    numclust = getBestPreference(pref, yCls, pl=True)
+    print(f'Estimated optimal number of clusters: {numclust}')
+    
+    
+
+#   getBestPreference.m
+def getBestPreference(x, y, pl=True):
+    """
+    % %getBestPreference Perform knee point detection
+    % to get the best clusters
+    % "Knee Point Detection in BIC for Detecting the Number of Clusters"
+    % Input:
+    %       x - X axis values
+    %       y - y axis values
+    %       pl - toggle plotting option
+    """
+    yp = 0 #i think that these are supposed to be indices, so i set to 0. if not, then it should be 1
+    xp = np.argwhere(y ==1)
+    if x.shape[0] != y.shape[0]:
+        print('Error')
+        return None
+    ys = y
+    pp = 3
+    maxabd = np.abs(y[2:] + y[0:-2] - (2*y[1:-1]))
+    ix = np.zeros(maxabd.shape[0], dtype=int)
+    uMaxabd = np.unique(maxabd)[::-1] #sort the array in descending order
+    uMaxabd = uMaxabd[1:]
+    cnt = 0
+    for i in range(0, uMaxabd.size):
+        ii = np.argwhere(maxabd == uMaxabd[i])[:, 0] # want 1d array of indices, but argwhere returns nx1 array of indices (each in own col.)
+        ix[cnt:cnt+ii.size] = ii[np.argsort(-ii)]
+        cnt += ii.size
+    n = x.size//20
+    ix = ix[0:n]
+    ix = ix + 1   #+1 here is a bit sus. I don't know what it does, but the code seems to work with it.
+    mangle = np.zeros(n)
+    for i in range(0, n):
+        if ix[i] > 1:
+            sl1 = np.divide( (y[ix[i]] - y[ix[i]-1]), (x[ix[i]] - x[ix[i]-1]) ) #pretty sure this is right. we should be doing proper matrix division
+            sl2 = np.divide( (y[ix[i]+1] - y[ix[i]]), (x[ix[i]+1] - x[ix[i]]) ) #same here.
+            mangle[i] = np.arctan( np.abs((sl1 + sl2)/(1 - (sl1*sl2))) )
+    maxMangle = np.max(mangle)
+    uI = (mangle == maxMangle)
+    im = np.min(ix[uI])
+    ii = im-1
+    xp = x[ii]
+    yp = ys[ii]
+    y = ys
+    #plotting here
+    if pl:
+        xCent = np.min(x) + 0.1*(np.max(x) - np.min(x))/2
+        yCent = np.min(y) + (np.max(y) - np.min(y))/2
+        optText = f'Estimated Optimal Cluster -- {yp}'
+        plt.figure()
+        plt.plot(x, y, '-r', label='# Clusters')
+        plt.plot(xp, yp, 'bo', label='Optimal Cluster')
+        plt.ylabel('Number of clusters')
+        plt.xlabel('Preference')
+        plt.text(xCent, yCent, optText)
+        plt.legend()
+        plt.show()
+    return yp
 
 def preferenceRange(s, method='bound'):
     """called in clsIn"""
