@@ -199,16 +199,16 @@ def getFocusplanesPerObjectMod(labelImage, fIndex, numZ=None):
         ll = np.zeros(2)
         ii = fIndex[labelImage]
         bins = np.append(np.linspace(0.5, numZ-0.5, num=int(numZ), endpoint=True), [numZ-0.5]) #this weird bin format gives a repeated final bin edge value, replicates histc function bin behaviour from matlab.
-        n = np.histogram(ii, bins=bins)[0]
+        n = np.histogram(ii, bins=bins)[0] #1d histogram array.
         n = n/np.sum(n)
         rndPoint = 1/numZ
-        p = np.argwhere(n > rndPoint)
+        p = np.argwhere(n > rndPoint)+1 #find returns linear indices, so does argwhere, except starting at 0. for matlab , indices corresponds 1-1 to z-planes. need +1 to get proper z-planes values.
         if p.size == 0:
-            minN = 0 #assume this is a indexing thing
-            maxN = numZ -1
+            minN = 1
+            maxN = numZ
         else:
-            minN = int(max([0, np.min(p)-2]))
-            maxN = int(min([numZ-1, np.max(p)+2]))
+            minN = max([1, np.min(p)-2])
+            maxN = min([numZ, np.max(p)+2])
 
         ll[0] = int(minN)
         ll[1] = int(maxN)
@@ -216,7 +216,7 @@ def getFocusplanesPerObjectMod(labelImage, fIndex, numZ=None):
         print('\nexception found')
         print(e)
         print()
-    return ll #, n dont need n here actually.
+    return ll #want ll to be zplane values, corresponding to fIndex values.
 
 #   getImageThreshold.m
 #exactly the same function as defined in the lib folder. copy and pasted here: degenerate code.
