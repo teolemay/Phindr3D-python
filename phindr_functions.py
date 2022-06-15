@@ -1,47 +1,11 @@
 """
-Teophile Lemay, 2021
+Teophile Lemay, 2022
 
 This file contains functions needed to replicate the Phindr3D tool in python. 
 code is directly copied/inspired (only modified so that it works in python instead of matlab) from https://github.com/DWALab/Phindr3D .
 
 lets do this.
-
-repository structure:
-    executables:
-        installation .exe files
-    lib:
-        lots of files
-    manuals:
-        phindr3D manual .pdf
-        organoid contour segmentation manual .pdf
-    phindr3d-organoidCSApp:
-        files for organoid contour segmentation
-    ThirdParty/Clustering:
-        clustering algos.
 """
-
-"""
-metadata format notes.upper():
-
-mData[ii, 0] is the same as fileNames.
-
-
-"""
-
-"""
-FORMAT TRANSLATION NOTES:
-
-rules of thumb from stackOverflow:
-    matlab array -> python numpy array
-
-    matlab cell array -> python list
-if indexing doesnt work properly for indexing with some other logical array, should try indexing with np.ix_()
-
-VERY POSSIBLY, I SHOULD USE DICTIONARIES / ORDERED DICTIONARIESTO REPLACE THE "CELL" COMPONENTS USED TO HOLD METADATA.
-
-ALSO POSSIBLE THAT ALL THE THINGS CURRENTLY SET AS CLASSES (PARAM, PAR, C) SHOULD ALSO BE REPLACED WITH DICTIONARIES
-"""
-
 
 from mahotas.features import texture
 import numpy as np
@@ -61,135 +25,6 @@ import mahotas as mt
 #my own functions:
 
 Generator = np.random.default_rng()
-
-#old version with lists
-# def get_files(folder_path, chan_mark='ch', slice_mark='p'):
-#     """
-#     this function gets the tiff files in a folder and organizes them into image/slice/channels in a nested array, according to the file naming convention used in the sample data I have
-
-#     numpy object array used for ease of indexing.
-
-#     file names in folder MUST follow same pattern ### This will NOT work for many types of images desired.
-#     """
-#     tif_files = glob.glob(f'{folder_path}\*.tiff')
-#     channel_pos = tif_files[0].rfind(chan_mark)
-#     slice_pos = tif_files[0][:channel_pos].rfind(slice_mark)
-#     path_frame = []
-#     imageIDs = []
-#     for file in tif_files:
-#         if file[:slice_pos] not in imageIDs:
-#             imageIDs.append(file[:slice_pos])
-#             imgs_in_group = []
-#             for fil in tif_files:
-#                 if fil[:slice_pos] == file[:slice_pos]:
-#                     imgs_in_group.append(fil)
-#             slices = []
-#             seen_slices = []
-#             for slice in imgs_in_group:
-#                 if slice[slice_pos:channel_pos] not in seen_slices:
-#                     channels = []
-#                     seen_slices.append(slice[slice_pos:channel_pos])
-#                     for fi in imgs_in_group:
-#                         if fi[:channel_pos] == slice[:channel_pos]:
-#                             channels.append(fi)
-#                     slices.append(channels)
-#             path_frame.append(slices)
-#     # path_frame = np.asarray(path_frame, dtype='object')
-#     # imageIDs = np.asarray(imageIDs, dtype='object')
-#     path_frame = np.array(path_frame, dtype='object')
-#     imageIDs = np.array(imageIDs, dtype='object')
-#     if path_frame.ndim != 3:
-#         print('\nInconsistent image/channel dimensions. File loading failed.')
-#     return path_frame, imageIDs
-
-#new version with dictionaries
-def get_files(folder_path, ID_pos=None, ID_mark='ImageID', ID_markextra=None, treat_mark='None', treat_endmark='_', slice_mark='p', chan_mark='ch'):
-    """
-    ### IT IS ASSUMED IN THIS FUNCTION THAT ALL MARKERS (ID, ZSLICE, CHANNEL, ETC.) END WITH NUMBERS THAT HELP MAKE THEM UNIQUE. ###
-
-    :param folder_path: str, path to desired folder
-    :param ID_mark: str or None, Put None if using other ID matching method string to match after which would be image ID. IF NO EXPLICIT IMAGE ID, THEN PUT 'start' -> will take all vals until the first other info mark.
-    :param chan_mark: str, string to match after which would be channel number
-    :param slic_mark: str, string to match after which would be slice number
-    :param ID_pos: str or None, if str, "start" means find ids starting from beginning of filenames. "end" means find IDs at end of filenames
-    :param ID_markextra: str or None, if str, then give secondary ID marker. (useful if image other image identifiers dont distinguish different objects)
-    :param treat_mark: str or None, str to match after which to find treatment label
-    :param treat_endmark: str or None, str to match for end of treatment label
-    
-    path_frame is nested dictionary: image id -> zslice -> channel -> image path
-    also returns list of all image ids
-    treatmentids is dictionary: treatment type -> all image ids with that treatment
-    idstreatment is dictionary: image id -> which type of treatment the image has.
-    """
-    tif_files = glob.glob(f'{folder_path}\*.tiff')
-    if len(tif_files) == 0:
-        print('No files found. Check file path.')
-    path_frame = {} #nested array/list framework to navigate to get image paths
-    if treat_mark != None:
-        treatmentids = {}
-        idstreatment = {}
-    else:
-        treatmentids = []
-        idstreatment = []
-    for afile in tif_files:
-        file = afile.removeprefix(f'{folder_path}\\')
-        idlabelstart = ''
-        idlabelend = ''
-        idlabelmark = ''
-        idlabelmarkextra= ''
-        if ID_pos == 'start':
-            tmpsli = re.search(slice_mark, file).start()
-            tmpcha = re.search(chan_mark, file).start()
-            idend = min(tmpsli, tmpcha)
-            idlabelstart = file[:idend]
-        if ID_pos == 'end':
-            idstart = re.search(ID_mark, file).start()
-            idend = re.search('.tiff', file).start()
-            idlabelend = file[idstart: idend]
-        if ID_mark != None:
-            m1 = re.search(ID_mark, file)
-            idstart = m1.start()
-            m = re.search(r'\D', file[m1.end():])
-            idend = m.start() + m1.end()
-            idlabelmark = file[idstart:idend] #string
-        if ID_markextra != None:
-            m1 = re.search(ID_markextra, file)
-            idstart = m1.start()
-            m = re.search(r'\D', file[m1.end():])
-            idend = m.start() + m1.end()
-            idlabelmarkextra = file[idstart:idend]
-        id = idlabelstart + idlabelend + idlabelmark + idlabelmarkextra
-        m = re.search(slice_mark, file)
-        slicestart=m.end()
-        m = re.search(r'\D', file[slicestart:])
-        sliceend = m.start() + slicestart
-        slice = int(file[slicestart:sliceend]) #integer
-        m = re.search(chan_mark, file)
-        chanstart = m.end()
-        m = re.search(r'\D', file[chanstart:])
-        chanend = m.start() + chanstart
-        chan = int(file[chanstart:chanend]) #integer
-        if id not in path_frame: #new ID -> initiate new dictionary sequence
-            path_frame[id] = {slice:{chan:afile}}
-            if treat_mark != None:
-                m1 = re.search(treat_mark, file)
-                treatstart = m1.start()
-                m = re.search(treat_endmark, file[treatstart:])
-                treatend = m.start() + m1.start()
-                treatval = file[treatstart:treatend]
-                idstreatment[id] = treatval
-                if treatval not in treatmentids:
-                    treatmentids[treatval] = [id]
-                else:
-                    treatmentids[treatval].append(id)
-        else: #id already exists, but new slice -> add slice entry to id dict, initiate new channel dict
-            if slice not in path_frame[id]:
-                path_frame[id][slice] = {chan:afile}
-            else: #only take the first exemplar of each ## this is to deal with possibly having multiple Objectives/objects in a field. For these, take only the first for simplicity.
-                if chan not in path_frame[id][slice]: #add if the channel is not already represented. if its already there, this is likely a different object.
-                    path_frame[id][slice][chan] = afile
-        
-    return path_frame, list(path_frame.keys()), treatmentids, idstreatment
 
 def random_cmap(map_len=40, black_background=True):
     """
@@ -242,7 +77,7 @@ class param_class:
         self.showChannels = False
         self.trainingPerColumn = False
         self.intensityNormPerTreatment = False
-        self.treatmentColNameForNormalization = ''
+        self.treatmentCol = ''
         self.trainingColforImageCategories = []
         self.superVoxelPerField = self.randTrainingSuperVoxel//self.randTrainingFields
         self.lowerbound = [0, 0, 0]
@@ -324,98 +159,46 @@ def im2col(img, blkShape):
     return blk_mtx
 
 
-
-
-#functions that we seem to need (only start with calculation functions, no gui stuff yet).
-
-#   AssignTilestoBins.m
-def assignTilestoBins(tiledImage, binCenters):
-    """
-    assigns tiles to bins
-    """
-    numBins = binCenters.shape[0] 
-    numTiles, numPixelTile, numChannels = tiledImage.shape
-    tiledImageDis = np.zeros((numTiles, numPixelTile, numBins))
-    for iBins in range(numBins):
-        tmp = np.tile(binCenters[iBins, :], (numPixelTile, 1)) # i believe this is the correct translation.
-        tmp =  tiledImage - tmp #apply operation @minus element wise to tiledIMage and tmp; minus(A, B) = A - B
-        tmp = tmp**2
-        tiledImageDis[:, :, iBins] = sum(tmp, axis=2)
-    
-    I = np.argmin(tiledImageDis, axis=2) #seems like we want the indices of the minimums along axis=2
-    tiledImageDis = I
-    return tiledImageDis 
-
-
-#   equalTrainingSamplePartition.m
-def equalTrainingSamplePartition(groups, samplesize):
-    par = par_class()
-    par.training = np.full((groups.size, 1), False)
-    par.test = np.full((groups.size, 1), False)
-    uniqueGroups = np.unique(groups[groups > 0])[0]
-    for iGroups in range(0, uniqueGroups.size):
-        ind = np.argwhere(groups == uniqueGroups[iGroups])
-        p = Generator.permutation(ind.size)
-        par.training[ind[p[:samplesize]], 0] = True #may or may not have to remove the ,0 at the end.
-        par.test[ind[p[samplesize:]], 0] = True
-    return par
+#functions that we seem to need (only start with calculation functions, no gui stuff).
 
 #   extractImageLevelTextureFeatures.m
-def extractImageLevelTextureFeatures(mData, allImageId, param, outputFileName='imagefeatures.csv', outputDir=''):
-    param.correctshade = 0
+def extractImageLevelTextureFeatures(mData, param, outputFileName='imagefeatures.csv', outputDir=''):
     if param.countBackground:
         totalBins = param.numMegaVoxelBins + 1
     else:
         totalBins = param.numMegaVoxelBins
-    uniqueImageID = allImageId
+    uniqueImageID = np.unique(mData[param.imageIDCol])
     resultIM = np.zeros((len(uniqueImageID), totalBins)) #for all images: put megavoxel frequencies
     resultRaw = np.zeros((len(uniqueImageID), totalBins))
     if param.textureFeatures:
         textureResults = np.zeros((len(uniqueImageID), 4))
-    # metaIndexTmp = np.empty((uniqueImageID.size, mData.shape[1]), dtype='object') #still not really sure what to put here
     useTreatment=False
-    if len(param.allTreatments) > 0:
+    if len(param.treatmentCol) > 0:
         useTreatment = True
         Treatments = []
     timeupdates = len(uniqueImageID)//5
-    for iImages in range(0, len(uniqueImageID)):
+    for iImages in range(len(uniqueImageID)):
         if (iImages == 1) or ((iImages > 3) and ((iImages+1) % timeupdates == 0)):
             print(f'Remaining time estimate ... {round(timeperimage * (len(uniqueImageID)-iImages)/60, 2)} minutes')
         if iImages == 0:
             a = time.time()
-        ii = uniqueImageID[iImages]
-        slicekeys = list(mData[ii].keys())
-        d, param.fmt = getImageInformation( mData[ii][slicekeys[0]] )
-        d[2] = len(mData[ii])
+        id = uniqueImageID[iImages]
+        tmpmdata = mData.loc[mData[param.imageIDCol[0]] == id]
+        d = getImageInformation(tmpmdata , param.channelCol[0])
         param = getTileInfo(d, param)
-        tmpInfoTable = mData[ii] #this is all the slices and channels in one 3d image
-        superVoxelProfile, fgSuperVoxel, Tass = getTileProfiles(tmpInfoTable, param.pixelBinCenters, param, ii)
-        megaVoxelProfile, fgMegaVoxel = getMegaVoxelProfile(superVoxelProfile, fgSuperVoxel, param, ii)
-        imgProfile, rawProfile, texture_features = getImageProfile(megaVoxelProfile, fgMegaVoxel, param, ii)
+        superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpmdata, param.pixelBinCenters, param)
+        megaVoxelProfile, fgMegaVoxel = getMegaVoxelProfile(superVoxelProfile, fgSuperVoxel, param)
+        imgProfile, rawProfile, texture_features = getImageProfile(megaVoxelProfile, fgMegaVoxel, param)
         resultIM[iImages, :] = imgProfile
         resultRaw[iImages, :] = rawProfile
         if param.textureFeatures: 
             textureResults[iImages, :] = texture_features
         if useTreatment:
-            Treatments.append(param.imageTreatments[ii])
+            Treatments.append(tmpmdata[param.treatmentCol].values[0])
         if iImages == 0:
             timeperimage = time.time() - a
-        # tmp = mData[ii] #this is never used.
-        # metaIndexTmp[iImages, :] = tmp[0, :] # i dont really get what this is for, I have omitted it from the output file as of 2021-11-27
-        # averageTime = averageTime + (time.time() - tImageAnal)
-        # print('time remaining:', (uniqueImageID.size -iImages-1)*(averageTime/(iImages+1)), 's')  #time left update i guess
     print('Writing data to file ...')
     numRawMV = np.sum(resultRaw, axis=1) #one value per image, gives number of megavoxels
-    #dataheader is just megavoxel labels to use as a column header in the output file 
-
-    #want to remove ImageID if existis in Metadata (i dont think this an issue that could come up here.)
-    # ii = param.metaDataHeader === 'ImageID'
-    # param.metaDataHeader = param.metaDataHeader
-    # resultTmp = concatenate: unique ImageID | numRawMv | resultIM (might as well just leave these separate)
-    # resultHeader = metadataheader (dont really have one at this point) | ImageID | numMV | dataHeaderIM ()
-    #write outputs to file. pd.DataFrame would be VERY good for this part. have to figure out how to integrate properly
-    #should probably try to put these together in a dataframe:
-    #still dont have anything of type metadataheader, or anything to do with 
     dictResults = {
         'ImageID':uniqueImageID
     }
@@ -431,7 +214,6 @@ def extractImageLevelTextureFeatures(mData, allImageId, param, outputFileName='i
         for i, name in enumerate(['text_ASM', 'text_entropy', 'text_info_corr1', 'text_infor_corr2']):
             dictResults[name] = textureResults[:, i]
     df = pd.DataFrame(dictResults)
-    # df.dropna(inplace=True) #removed dropna
     csv_name = outputFileName
     if len(outputDir) > 0:
         csv_name = outputDir + '\\' + csv_name
@@ -441,204 +223,28 @@ def extractImageLevelTextureFeatures(mData, allImageId, param, outputFileName='i
     print('\nAll done.')
     return param, resultIM, resultRaw, df #, metaIndexTmp
 
-#   findClosestPoint2Line.m
-def findClosestPoint2Line(pts, v1, v2):
-    d = np.zeros((pts.shape[0], 1))
-    if pts.shape[1] == 2:
-        pts = np.array([pts, d])
-    for i in range(0, pts.shape[0]):
-        d[i] = getDistancePointFromLine(pts[i, :], v1, v2)
-    closestIndex = np.argmin(d)
-    return closestIndex
-
-#   getBestPreference.m
-def getBestPreference(x, y, pl=False):
-    """
-    % %getBestPreference Perform knee point detection
-    % to get the best clusters
-    % "Knee Point Detection in BIC for Detecting the Number of Clusters"
-    % Input:
-    %       x - X axis values
-    %       y - y axis values
-    %       pl - toggle plotting option
-    """
-    yp = 0 #i think that these are supposed to be indices, so i set to 0. if not, then it should be 1
-    xp = np.argwhere(y ==1)
-    if x.shape[0] != y.shape[0]:
-        print('Error')
-        return None
-    ys = y
-    pp = 3
-    maxabd = np.abs(y[2:] + y[0:-2] - (2*y[1:-1]))
-    ix = np.zeros((maxabd.shape[0], 1))
-    uMaxabd = np.unique(maxabd)[::-1].sort() #sort the array in descending order. This format should work
-    uMaxabd = uMaxabd[1:]
-    cnt = 0
-    for i in range(0, uMaxabd.size):
-        ii = np.argwhere(maxabd == uMaxabd[i])
-        ix[cnt:cnt+ii.size]  = ii[::-1].sort() #i dont think i need to put -1 after cnt + ii.size bc python omits last index already and I feel like matlab doesnt.
-        cnt += ii.size
-    n = x.size//2
-    ix = ix[0:n]
-    ix = ix + 1
-    mangle = np.zeros((n, 1))
-    for i in range(0, n):
-        if ix[i] > 1:
-            sl1 = np.divide( (y[ix[i]] - y[ix[i]-1]), (x[ix[i]] - x[ix[i]-1]) ) #pretty sure this is right. we should be doing proper matrix division
-            sl2 = np.divide( (y[ix[i]+1] - y[ix[i]]), (x[ix[i]+1] - x[ix[i]]) ) #same here.
-            mangle[i] = np.arctan( np.abs((sl1 + sl2)/(1 - (sl1*sl2))) )
-    maxMangle = np.max(mangle)
-    uI = mangle == maxMangle
-    im = np.min(ix[uI])
-    ii = im-1
-    xp = x[ii]
-    yp = ys[ii]
-    y = ys
-    #plotting here
-    if pl:
-        xCent = np.min(x) + (np.max(x) + np.min(x))/2
-        yCent = (y[-1] - y[0])/2
-        optText = f'Estimated Optimal Cluster -- {yp}'
-        plt.figure()
-        plt.plot(x, y, '-r', markercolor='r', lable='# Clusters')
-        plt.plot(xp, yp, '-bo', lable='Optimal Cluster')
-        plt.ylabel('Number of clusters')
-        plt.xlabel('Preference')
-        plt.text(xCent, yCent, optText)
-        plt.legend()
-    return yp, xp
-
-#   getDistancePointFromLine.m
-def getDistancePointFromLine(pt, v1, v2):
-    """called in findClosestPoint2Line"""
-    a = v1 - v2
-    b = pt - v2
-    d = np.linalg.norm(np.divide(np.cross(a, b), np.norm(a)))
-    return d
-
-#NOT FINISHED WITH THIS ONE YET.
-#   getExtractedMetadata.m
-def getExtractedMetadata(pth, astr, exprIM, opFilename):
-    """
-    function creates metadata from folder i think.
-
-    need better understanding of what actually is supposed to be in the metadata. maybe would be usefull to understand what gets parsed from metadata.
-    """
-    m = regexpi(str, exprIM, 'Names') #want name and text of each named token. 
-    #If str and expression are both character vectors or string scalars, 
-    # the output is a 1-by-n structure array, where n is the number of matches. 
-    # The structure field names correspond to the token names.
-
-    if len(m) == 0:
-        print('Regular expression mismatch')
-        return None
-
-#   getGroupIndices.m
-def getGroupIndices(textData, grpNames, Narg=None):
-    if Narg == None:
-        output = True
-    else:
-        output = False
-    if (len(textData) == 0) or (len(grpNames) == 0):
-        print('No data')
-        return None
-    numGrps = len(grpNames)
-    grps = np.zeros((len(textData), 1))
-    for i in range(numGrps):
-        p = grpNames[i] == textData[:, 0]
-        idx = np.nonzero(p)
-        if output:
-            print(f'NUmber of Points in {grpNames[i]} is {idx}')
-        if idx.size == 0:
-            pass
-        grps[idx, 0] = i
-    return grps
-    
-#NOT FINISHED WITH THIS ONE YET. HAS SOME DETAILS ABOUT METADATA CELL FORMAT THAT COULD BE USEFUL.
-#not really that important to have it right now, its more useful for quality of life
-#   getImage2Display.m
-# def getImage2Display(mData, metaHeader, param, ImageID2View, imageID, chanInfo, stack2View, typeofView):
-#     """
-#     select image based on specific image ID (support for GUI program.)
-
-#     % mData -Metadata cell array consisting of individual image information
-#     %           in each row
-#     %
-#     % metaHeader - Associated metadata header
-#     %
-#     % param - Parameter file (Structure variable)
-#     % 
-#     % imageID2View - Image id selected to view
-#     % 
-#     % imageID - List of all image ID. Column vector
-#     % 
-#     % chanInfo - Structure variable having specific information about channels
-#     % 
-#     % stack2View - If viewing single slice then the stack number to view
-#     % typeOfView - Montage, MIP. Any other choice defaults to single plane
-#      """
-#     #  get image from image Id, sort z stacks, norm things, show image projection based on user choices.
-#     # x = 
-#     # y =
-#     # z = 
-#     return image2Display
-
-#   getImageIDfromMetadata.m
-def getImageID(metadata, rootDir, exprIM):
-    """
-    gets unique image ID
-    """
-    uCol = metadata[:, 0] #first column is always one of the channels
-    astr = uCol[10, :] #just pick any row (what does this mean??)
-    astr = re.sub(rootDir, '', astr) #replace all text in astr that matches with rootDir with '' (nothing).
-    m1 = regexpi(astr, exprIM, 'names') #I think this returns a dictionary of {name:token text, ...}
-    ff = m1.keys() #list of fieldnames (dictionary keys) 
-    ff = [key.lower() for key in ff]#make lowercase for easier list comprehension.
-    try:
-        stackNuminRegexp = ff.index('stack')
-    except ValueError:
-        stackNuminRegexp = ff.index('stacks')
-    for i in range(uCol.size):
-        astr = re.sub(rootDir, '', uCol[i, :])
-        mm = regexpi(astr, exprIM, fmt='tokenExtents')
-        mm = mm[0, 0]
-        mm = mm[stackNuminRegexp, :]
-        uCol[i, :] = astr[0:mm[0]-1, mm[1]+1:] #may be wrong here.
-    uUCol = np.unique(uCol)[0]
-    imageIDcol = np.zeros((metadata.shape[0], 1))
-    cnt = 1
-    numUCol = uUCol.size
-    for i in range(0, numUCol):
-        ii = uCol == uUCol[i, :]
-        imageIDcol[ii, 0] = cnt
-        cnt += 1
-    return imageIDcol
 
 #   getImageInformation.m
-def getImageInformation( fileNames ):
+def getImageInformation(tmpdf, chan):
     """called in getPixelBinCenters"""
     """called in extractImageLevelTextureFeatures"""
     """
     gets image dimensions from file names.
-    fileNames is a dict: {chan#:path, chan#:path, chan#:path}
+    tmpdf is a (truncated) metadata dataframe containg a single shared image ID across all rows
+    channelcol is column index of all channel columns
+    stackcol is column index of stack column
     """
-    fileNames = list(fileNames.values())
-    if len(fileNames) == 0:
-        print('File name empty')
+    imFileName = tmpdf[chan][tmpdf.index[0]]
+    #want to get to single filename (first file is convenient.)
     d = np.ones(3, dtype=int)
-    fmt = 'tif'
-    imFileName = fileNames[0] #just want the name of the first file.
-    if isinstance(imFileName, dict): # then filenames is a list of dicts
-        imFileName = list(imFileName.values()) # list of values of imFileNames if it was a dict (channel paths)
-        imFileName = imFileName[0]
-    d[2] = len(fileNames) #this is number of z stacks #will often be overwritten later.
+    d[2] = len(tmpdf)
     info = imfinfo(imFileName) #imfinfo is matlab built-in.
     d[0] = info.Height 
     d[1] = info.Width
-    return d, fmt
+    return d
 
 #   getImageProfile.m
-def getImageProfile(megaVoxelProfile, fgMegaVoxel, param, imagename):
+def getImageProfile(megaVoxelProfile, fgMegaVoxel, param):
     """called in extractImageLevelTextureFeatures"""
     """
     provides multi-parametric representation of image based on megavoxel categories
@@ -658,7 +264,7 @@ def getImageProfile(megaVoxelProfile, fgMegaVoxel, param, imagename):
         mv_show = np.reshape(x, (param.numMegaVoxelZ, param.numMegaVoxelX, param.numMegaVoxelY))
         for i in range(mv_show.shape[0]):
             plt.figure()
-            title = f'{imagename} megavoxel image'
+            title = f'Megavoxel image'
             plt.title(title)
             plt.imshow(mv_show[i, :, :], param.mvcolormap)  ###################correct one
             # plt.imshow(mv_show[i, :, :], 'viridis') ############# viridis to compare with matlab easier.
@@ -729,21 +335,18 @@ def getImageThreshold(IM):
     return imThreshold
 
 #   getImageThresholdValues.m
-def getImageThresholdValues(mData, allImageId, param):
+def getImageThresholdValues(mData, param):
     """
     get image threshold values for dataset.  
     """
     intensityThresholdValues = np.full((5000, param.numChannels), np.nan) #not sure why we want 5000 rows
     startVal = 0
     endVal = 0
-    for iImages in range(0, len(param.randFieldID)): #for each of the randomly selected images chosen earlier:
-        ii = param.randFieldID[iImages] #image_ID #i
-        xx = mData[ii] #dict of all the slices corresponding to image with imageID ii
-        if len(xx) == 0:
-            print('SSS') #dont know about this one, seems pointless
-        d, param.fmt = getImageInformation(xx)
+    for id in param.randFieldID: #for each of the randomly selected images chosen earlier:
+        tmpmdata = mData.loc[mData[param.imageIDCol[0]] == id].reset_index(drop=True) #dict of all the slices corresponding to image with imageID ii
+        d = getImageInformation(tmpmdata, param.channelCol[0]) #xx is the list of slices.
         param = getTileInfo(d, param)
-        iTmp = getIndividualChannelThreshold(xx, param, ii=ii) #use mData[ii][0] because we obviously only want 1 image at a time, and mData contains all the 3d images so that leaves an extra layer of list to get through.
+        iTmp = getIndividualChannelThreshold(tmpmdata, param) #just giving the list of slices for an imageID
         intensityThresholdValues[startVal:endVal+iTmp.shape[0], :] = iTmp
         startVal += iTmp.shape[0]
         endVal += iTmp.shape[0]
@@ -752,39 +355,19 @@ def getImageThresholdValues(mData, allImageId, param):
     param.intensityThresholdValues = intensityThresholdValues[np.isfinite(intensityThresholdValues).any(axis=1)] # remember everything gets rescaled from 0 to 1 #drop rows containing nan, then take medians for each channel#intensityThresholdValues[ii]
     # param.intensityThresholdValues = intensityThresholdValues[jj]
     return param
-
-#   getImageWithSVMVOverlay.m
-def getImageWithSVMVOverlay(IM, param, type):
-    """
-    I assume this means get image with superVoxel or megaVoxel overlay.
-
-    % param.tileX = 10;
-    % param.tileY = 10;
-    % param.megaVoxelTileX = 5;
-    % param.megaVoxelTileY = 5;
-    """
-    if type == 'SV':
-        IM[:param.tileX:, :, :] = 0.7
-        IM[:, :param.tileY:, :] = 0.7
-    else:
-        IM[:param.tileX*param.megaVoxelTileX:, :, :] = 1
-        IM[:, :param.tileY*param.megaVoxelTileY:, :] = 1
-    return IM
  
 #   getIndividualChannelThreshold.m
-def getIndividualChannelThreshold(filenames, param, ii=None):
+def getIndividualChannelThreshold(tmpmdata, param):
     """called in getImageThresholdValues""" 
-    slicekeys = list(filenames.keys())
-    channelkeys = sorted(list(filenames[slicekeys[0]].keys())) 
-    numberChannels = len(channelkeys)
-    thresh = np.zeros((len(slicekeys), numberChannels))
-    if ii == None:
-        ii = np.full(thresh.shape, True)
+    """
+    tmpmdata is the truncated metadata dataframe for a single image id.
+    """
+    thresh = np.zeros((len(tmpmdata), param.numChannels))
     if param.intensityNormPerTreatment:
-        grpVal = np.argwhere(param.allTreatments == param.imageTreatments[ii])
-    for iImages in range(0, len(slicekeys)):
-        for iChannels in range(0, numberChannels):
-            IM = io.imread(filenames[slicekeys[iImages]][channelkeys[iChannels]]) #used to bechannelkeys[iChannels]
+        grpVal = np.argwhere(param.allTreatments == tmpmdata[param.treatmentCol].values[0])
+    for iImages in range(len(tmpmdata)):
+        for iChannels in range(param.numChannels):
+            IM = io.imread(tmpmdata.loc[iImages, param.channelCol[iChannels]]) 
             xEnd = -param.xOffsetEnd
             if xEnd == -0:
                 xEnd = None   #if the end index is -0, you just index from 1 to behind 1 and get an empty array. change to 0 if the dimOffsetEnd value is 0.
@@ -802,84 +385,12 @@ def getIndividualChannelThreshold(filenames, param, ii=None):
 
 ######never used.
 #   getIntensityFeatures.m 
-# def getIntesityFeatures(metadataFileRaw, metadataFilenameLabel, uImageID, param): #added param to function parameters because it is somehow called here.
-#     param.channelDiscarded = [] #empty matrix -> empty list should be fine.
-#     metadataLabel, discard1, discard2, imageIDLabel = getPlateInfoFromMetadatafile(metadataFilenameLabel, param)
-#     metadataRaw, headerRaw, discard1, imageIDRaw = getPlateInfoFromMetadatafile(metadataFileRaw, param)
-#     stkCol = headerRaw == 'Stack'
-#     allFeatures = np.full((uImageID.size, 4), np.nan)
-#     for i in range(0, uImageID.size):
-#         ii = imageIDRaw = uImageID[i]
-#         if np.sum(ii) == 0:
-#             continue
-#         stk = [int(stackstr) for stackstr in metadataRaw[ii, stkCol]] #these values are presumably str values in some array container. want to convert each eeach string to int.
-#         stk2pick = (np.max(stk) - np.min(stk))//2
-#         jj = stk == np.min(stk) + stk2pick
-#         channelCol = metadataRaw[ii, 0:3]
-#         channelCol = channelCol[jj, :]
-#         #label image
-#         kk = imageIDLabel == uImageID[i]
-#         labelImage = metadataLabel[kk, 0]
-#         labelImage = io.imread(labelImage)
-#         labelImage = labelImage > 0
-#         labelImage = cv.erode(labelImage, np.ones((20,20)))
-#         labelImageEroded = cv.erode(labelImage, np.ones((20,20))) #erode twice
-#         #in their code, There is commented out imshow() stuff to show the eroded images here.
-
-#         for k in range(0,3):
-#             rawImage = io.imread(channelCol[0, k]).astype(np.float64) #remember it is '.Tiff' file.
-#             im1 = labelImageEroded * rawImage #elementwise multiplication is correct here
-#             int1 = np.sum(im1) / np.sum(labelImageEroded)
-#             im1 = (labelImage - labelImageEroded) * rawImage #elementwise multiplication is correct
-#             l = labelImage - labelImageEroded
-#             int2 = np.sum(im1)/np.sum(l)
-#             allFeatures[i, k] = int2/int1
-#         allFeatures[i, 4] = np.max(stk) - np.min(stk)
-#         #get MIP
-#     allFeaturesInt = np.full((uImageID.size, 3), np.nan)
-#     for i in range(0, uImageID.size):
-#         ii = imageIDRaw == uImageID[i]
-#         if np.sum(ii) == 0:
-#             continue
-#         stk = [int(stackstr) for stackstr in metadataRaw[ii, stkCol]]
-#         stk2pick = (np.max(stk) - np.min(stk))//2
-#         jj = stk == (np.min(stk)+stk2pick)
-#         channelCol = metadataRaw[ii, 1:3]b
-#         #label image
-#         kk = imageIDLabel == uImageID[i]
-#         labelImage = metadataLabel[kk, 0]
-#         labelImage = io.imread(labelImage)
-#         labelImage = labelImage > 0
-#         #commented code: eroded image
-#         for k in range(0, 3):
-#             rawImage = getMIPImage(channelCol[:, k])
-#             im1 = labelImage * rawImage
-#             allFeaturesInt[i, k] = np.sum(im1) / np.sum(labelImage)
-#     allHeader = ['Ch1Int', 'Ch2Int', 'Ch3Int', 'Ch1Ratio', 'Ch2Ratio', 'Ch3Ratio', 'NumPlanes']
-#     allData = [allFeaturesInt, allFeatures]
-#     return allHeader, allData
 
 #never used
 #   getMIPImage.m
-def getMIPImage(imfiles):
-    """called in getIntensityFeatures"""
-    """
-    getMIPImage Creates maximum intensity projected images for a set of image
-    files in imfiles
-    """
-    format = regexpi(imfiles[0, 0], r'\.', fmt='split')
-    format = format[0, -1]
-    numzPlanes = imfiles.shape[0]
-    info = imfinfo(imfiles[0,0], format)
-    imMIP = np.ones((info.Height, info.Width)) * (-1) * np.inf #why not just initialize with 0, idk, but this works
-    for i in range(0, numzPlanes):
-        tmp = io.imread(imfiles[i, 0], format).astype(np.float64)
-        tmp = sc.signal.medfilt2d(tmp, kernel_size=3)
-        imMIP = np.maximum(imMIP, tmp)
-    return imMIP
 
 #   getMegaVoxelBinCenters.m
-def getMegaVoxelBinCenters(mData, allImageId, param):
+def getMegaVoxelBinCenters(mData, param):
     """
     compute bincenters for megaVoxels
 
@@ -890,21 +401,18 @@ def getMegaVoxelBinCenters(mData, allImageId, param):
     % param - Appended parameters
     """
     MegaVoxelsforTraining = []
-    for iImages in range(0, len(param.randFieldID)):
-        ii = param.randFieldID[iImages]
-        slicekeys = list(mData[ii].keys())
-        d, param.fmt = getImageInformation(mData[ii][slicekeys[0]])
-        d[2] = len(mData[ii])
+    for id in param.randFieldID:
+        tmpmdata = mData.loc[mData[param.imageIDCol[0]] == id]
+        d = getImageInformation(tmpmdata, param.channelCol[0])
         param = getTileInfo(d, param)
-        tmpInfoTable = mData[ii]
-        superVoxelProfile, fgSuperVoxel, Tass = getTileProfiles(tmpInfoTable, param.pixelBinCenters, param, ii)
-        megaVoxelProfile, fgMegaVoxel = getMegaVoxelProfile(superVoxelProfile, fgSuperVoxel, param, ii)
+        superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpmdata, param.pixelBinCenters, param)
+        megaVoxelProfile, fgMegaVoxel = getMegaVoxelProfile(superVoxelProfile, fgSuperVoxel, param)
         if len(MegaVoxelsforTraining) == 0:
             MegaVoxelsforTraining = megaVoxelProfile[fgMegaVoxel]
         else:
             MegaVoxelsforTraining = np.concatenate((MegaVoxelsforTraining, megaVoxelProfile[fgMegaVoxel]))
     param.megaVoxelBincenters = getPixelBins(MegaVoxelsforTraining, param.numMegaVoxelBins)
-    
+    # visualization
     if param.showBincenters:
         from phindr_clustering import sammon
         try:
@@ -940,7 +448,7 @@ def getMegaVoxelBinCenters(mData, allImageId, param):
     return param
 
 #   getMegaVoxelProfile.m
-def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param, imagename):
+def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param):
     """called in extractImageLevelTextureFeatures"""
     """called in getMegaVoxelBinCenters"""
     temp1 = np.array([mat_dot(param.supervoxelBincenters, param.supervoxelBincenters, axis=1)]).T
@@ -950,12 +458,11 @@ def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param, imagename):
     x = np.zeros(tileProfile.shape[0], dtype='uint8') #x is the right shape
     x[fgSuperVoxel] = minDis
     #had to change x shape here from matlab form to more numpy like shape. 
-    # x = np.reshape(x, (int(param.croppedX/param.tileX), int(param.croppedY/param.tileY), int(param.croppedZ/param.tileZ))) #old shaping
     x = np.reshape(x, (int(param.croppedZ/param.tileZ), int(param.croppedX/param.tileX), int(param.croppedY/param.tileY))) #new shape (z, x, y)
     if param.showImage:
         for i in range(x.shape[0]):
             plt.figure()
-            title = f'{imagename} Super-voxel image'
+            title = f'Supervoxel image'
             plt.title(title)
             plt.imshow(x[i, :, :], param.svcolormap) ##############################This is the correct one
             # plt.imshow(x[i, :, :], 'viridis') #########viridis to compare to matlab map
@@ -965,19 +472,15 @@ def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param, imagename):
 
     #pad first dimension 
     x = np.concatenate([ np.zeros((param.superVoxelZAddStart, x.shape[1], x.shape[2])), x, np.zeros((param.superVoxelZAddEnd, x.shape[1], x.shape[2])) ], axis=0) #new (z, x, y) shape
-    # x = np.concatenate([ np.zeros((param.superVoxelXAddStart, x.shape[1], x.shape[2])), x, np.zeros((param.superVoxelXAddEnd, x.shape[1], x.shape[2])) ], axis=0) #for old (x, y, z) shape
     #pad second dimension
     x = np.concatenate([ np.zeros((x.shape[0], param.superVoxelXAddStart, x.shape[2])), x, np.zeros((x.shape[0], param.superVoxelXAddEnd, x.shape[2])) ], axis=1) #new (z, x, y) shape
-    # x = np.concatenate([ np.zeros((x.shape[0], param.superVoxelYAddStart, x.shape[2])), x, np.zeros((x.shape[0], param.superVoxelYAddEnd, x.shape[2])) ], axis=1) #for old (x, y, z) shape
     #pad third dimension
     x = np.concatenate([ np.zeros((x.shape[0], x.shape[1], param.superVoxelYAddStart)), x, np.zeros((x.shape[0], x.shape[1], param.superVoxelYAddEnd)) ], axis=2) #for new (z, x, y) shape
-    # x = np.concatenate([ np.zeros((x.shape[0], x.shape[1], param.superVoxelZAddStart)), x, np.zeros((x.shape[0], x.shape[1], param.superVoxelZAddEnd)) ], axis=2) #for old (x, y, z) shape
     x = x.astype(np.uint8)
     param.numMegaVoxelX = x.shape[1]//param.megaVoxelTileX
     param.numMegaVoxelY = x.shape[2]//param.megaVoxelTileY
     param.numMegaVoxelZ = x.shape[0]//param.megaVoxelTileZ
     param.numMegaVoxelsXY = int(x.shape[1] * x.shape[2] / (param.megaVoxelTileY * param.megaVoxelTileX)) #for new shape
-    # param.numMegaVoxelsXY = int(x.shape[0] * x.shape[1] / (param.megaVoxelTileY * param.megaVoxelTileX))
     param.numMegaVoxels = int((param.numMegaVoxelsXY*x.shape[0])/param.megaVoxelTileZ)
     sliceCounter = 0
     startVal = 0
@@ -993,7 +496,6 @@ def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param, imagename):
     for iSuperVoxelImagesZ in range(0, x.shape[0]):
         sliceCounter += 1
         tmpData[:, startCol:endCol] = im2col(x[iSuperVoxelImagesZ, :, :], (param.megaVoxelTileX, param.megaVoxelTileY)).T #changed which axis is used to iterate through z.
-        # tmpData[:, startCol:endCol] = im2col(x[:, :, iSuperVoxelImagesZ], (param.megaVoxelTileX, param.megaVoxelTileY), type='distinct') 
         startCol += (param.megaVoxelTileX*param.megaVoxelTileY)
         endCol += (param.megaVoxelTileX*param.megaVoxelTileY)
         if sliceCounter == param.megaVoxelTileZ:
@@ -1008,56 +510,15 @@ def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param, imagename):
             endVal += param.numMegaVoxelsXY
     if not param.countBackground:
         megaVoxelProfile = megaVoxelProfile[:, 1:]
-    megaVoxelProfile = np.divide(megaVoxelProfile, np.array([np.sum(megaVoxelProfile, axis=1)]).T) #hopefully this works, they ask for elementwise, but the arrays seem to have different shapes.
+    megaVoxelProfile = np.divide(megaVoxelProfile, np.array([np.sum(megaVoxelProfile, axis=1)]).T) #dont worry about divide by zero here either
     fgMegaVoxel = fgMegaVoxel.astype(bool) 
     return megaVoxelProfile, fgMegaVoxel
 
 # Never used
 #   getMerged3DImage.m
-def getMerged3DImage(filenames, colors, boundValues, thresholdValues):
-    #this function makes a distinction about whether filenames is a matlab cell array or not.
-    #hopefully, I can standardize things down the line so that this distinction is not needed.
-    #here, it looks like cell format filenames means list/array of file names, non-cell format means filenames is actually already multichannel image
-    
-    #here, I have a poor workaround, but hopefully it holds for now. Will need to come back to this to FIX LATER
-    if (filenames.shape[1] == colors.shape[0]): #hopefully neitther of the shape matches can happen coincidentally.
-        numChannels = filenames.shape[1]
-        info = imfinfo(filenames[0, 0])
-        imWidth = info.Width
-        imHeight = info.Height
-        cellFile = True #unclear if this is necessary
-    elif (filenames.shape[2] == colors.shape[1]):
-        numChannels = filenames.shape[2]
-        imWidth = filenames.shape[1]
-        imHeight = filenames.shape[0]
-        cellFile = False
-    else: #i no colors and shape matches.
-        im3D = np.ones((1000, 1000, 3))
-        return im3D
-    im3D = np.zeros((imHeight, imWidth, 3))
-    #want to give image pseudocolor for each channel
-    for jChannel in range(0, numChannels):
-        if cellFile:
-            im = io.imread(filenames[0, jChannel]).astype(np.float64)
-        else:
-            im = filenames[:, :, jChannel]
-        maxMin = np.abs(boundValues[jChannel, 1]) - boundValues[jChannel, 0]
-        im = (im - boundValues[jChannel, 0])/maxMin
-        im[im>1] = 1
-        im[im<0] = 0
-        im = im * (im >= thresholdValues[jChannel]) #not sure how this works because im has already been converted to a binary array it seems
-        im3D[:, :, 0] = im3D[:, :, 0] + colors[jChannel, 0]*im
-        im3D[:, :, 1] = im3D[:, :, 1] + colors[jChannel, 1]*im
-        im3D[:, :, 2] = im3D[:, :, 2] + colors[jChannel, 2]*im
-    for i in range(0, 3):
-        maxI = np.max(np.max(im3D[:, :, i]))
-        minI = np.min(np.min(im3D[:, :, i]))
-        if (maxI - minI) > 0:
-            im3D[:, :, i] = (im3D[:, :, i] - minI)/(maxI - minI)
-    return im3D
 
 #   getPixelBinCenters.m
-def getPixelBinCenters(mData, allImageId, param):
+def getPixelBinCenters(mData, param):
     """
     compute bincenters for pixels
 
@@ -1070,14 +531,12 @@ def getPixelBinCenters(mData, allImageId, param):
     pixelsForTraining = np.zeros((300000, param.numChannels)) # long array [channel 1[very long zeros...], channel2[very long zeros...], channel3[very long zeros ...]] by 3 channels
     startVal = 0
     endVal = 0
-    for iImages in range(len(param.randFieldID)): #for each i in range (length of training image set)
-        ii = param.randFieldID[iImages]  #image name
-        slicekeys = list(mData[ii].keys()) #each z slice corresponding to the image
-        d, param.fmt = getImageInformation( mData[ii][slicekeys[0]] )
-        d[2] = len(mData[ii])
+    for id in param.randFieldID: #for each i in range (length of training image set)  #image name
+        tmpmdata = mData.loc[mData[param.imageIDCol[0]] == id]
+        d = getImageInformation(tmpmdata, param.channelCol[0])
         param = getTileInfo(d, param)
-        param.randZForTraining = len(mData[ii])//2 #want to take half (floor) of the z slices
-        iTmp = getTrainingPixels(mData[ii], param, ii) #load correct 3d 3 channel image. should be 3 channels with flatenned image in each.
+        param.randZForTraining = len(tmpmdata)//2 #want to take half (floor) of the z slices
+        iTmp = getTrainingPixels(tmpmdata, param) #load correct 3d 3 channel image. should be 3 channels with flatenned image in each.
         pixelsForTraining[startVal:endVal+iTmp.shape[0], :] = iTmp #add to list.
         startVal += iTmp.shape[0]
         endVal += iTmp.shape[0]
@@ -1187,53 +646,40 @@ def getPixelBins(x, numBins):
     return np.abs(binCenters)
 
 #   getScalingFactorforImages.m
-def getScalingFactorforImages(metadata, allImageID, param):
+def getScalingFactorforImages(metadata, param):
     """
     compute lower and higher scaling values for each image
     param: structure of parameter value
     metadata: Metadata
 
     """
+    randFieldIDforNormalization = getTrainingFields(metadata, param) #choose images for scaling
     if param.intensityNormPerTreatment:
-        randFieldIDforNormalization, treatmentVals = getTrainingFields(metadata, param, allImageID, param.treatmentColNameForNormalization) #choose images for scaling
         grpVal = np.zeros(randFieldIDforNormalization.size)
-    else:
-        randFieldIDforNormalization, treatmentVals = getTrainingFields(metadata, param, allImageID, param.trainingColforImageCategories)
     minChannel = np.zeros((randFieldIDforNormalization.size, param.numChannels)) #min values of all selected images in all channels
     maxChannel = np.zeros((randFieldIDforNormalization.size, param.numChannels)) #max values of all selected images in all channels
     numImages = randFieldIDforNormalization.size
     for i in range(0, numImages):
         # which images 
-        ii = randFieldIDforNormalization[i] # which 3d image
-        filenames = metadata[ii] #file dict of slices/channels { slice1:{channels}, slice2:{channels}, ... }
-        slices = list(filenames.keys()) #all the slice key values
-        if len(filenames) == 0:
-            print('SSS (no filenames)')
-        # print(filenames[0, 0]) #in matlab this just returns the value at 0, 0 in the cell. for now, keep as print
-        if i == 0:
-            d, fmt = getImageInformation(filenames[slices[0]]) #filenames[0, 0] is selected group 0, stack 0, list of all channel images
-        d[2] = len(filenames) #number of z stacks
-        param = getTileInfo(d, param) 
-        randZ = int(d[2]//2 )
-        #### HERE CHANGE BACK
-        randZ = Generator.choice(int(d[2]), size=randZ, replace=False, shuffle=False) #choose half of the stack, randomly
-
-        randfilenames = [filenames[slices[i]] for i in randZ] #list of dicts [{chan1:'path', ...}, {chan1:'path', ...}, ...] in random order. this has the slices chosen by randZ
-        minVal = np.full((len(randfilenames), param.numChannels), np.inf)
-        maxVal = np.full((len(randfilenames), param.numChannels), -1*np.inf)
-        channelkeys = sorted(list(randfilenames[0].keys()))
-        for j in range(0, len(randfilenames)): 
-            for k in range(0, param.numChannels):
-                IM = io.imread(randfilenames[j][channelkeys[k]]) 
+        id = randFieldIDforNormalization[i] # which 3d image
+        tmpmdata = metadata.loc[metadata[param.imageIDCol[0]]==id]
+        zStack = np.ravel(tmpmdata[param.stackCol])
+        depth = len(zStack)
+        #used to be a getTileInfo here.
+        randHalf = int(depth//2 )
+        randZ = [zStack[j] for j in Generator.choice(depth, size=randHalf, replace=False, shuffle=False)] #choose half of the stack, randomly
+        minVal = np.zeros((randHalf, param.numChannels))
+        maxVal = np.zeros((randHalf, param.numChannels))
+        for j in range(randHalf): 
+            for k in range(param.numChannels):
+                IM = io.imread(tmpmdata.loc[tmpmdata[param.stackCol[0]]==randZ[j], param.channelCol[k]].values[0]) 
                 minVal[j, k] = np.quantile(IM, 0.01)
-                # minVal[j, k] = min(minVal[j, k], np.quantile(IM, 0.01)) #dont really need the min and max thins there, we already know which one it will end up being since the prev val is inf or -inf.
                 maxVal[j, k] = np.quantile(IM, 0.99)
-                # maxVal[j, k] = max(maxVal[j, k], np.quantile(IM, 0.99))
         minChannel[i, :] = np.amin(minVal, axis=0)
         maxChannel[i, :] = np.amax(maxVal, axis=0)
         if param.intensityNormPerTreatment:
-            #index of the treatment for this image in the list of all treatments
-            grpVal[i] = np.argwhere(param.allTreatments == param.imageTreatments[ii]) #param.imageTreatments[ii] is the treatment of the current image
+            #index of the treatment for this image in the list of all treatment
+            grpVal[i] = np.argwhere(param.allTreatments == tmpmdata[param.treatmentCol].values[0]) #tmpdata[param.treatmentCol[0]][0] is the treatment of the current image
     if param.intensityNormPerTreatment:
         uGrp = np.unique(grpVal)
         param.lowerbound = np.zeros((uGrp.size, param.numChannels))
@@ -1253,7 +699,7 @@ def getScalingFactorforImages(metadata, allImageID, param):
     return param
 
 #   getSuperVoxelBinCenters.m
-def getSuperVoxelBinCenters(mData, allImageId, param):
+def getSuperVoxelBinCenters(mData, param):
     """
     compute bin centers for super voxels
     % mData  - Metadata
@@ -1262,14 +708,11 @@ def getSuperVoxelBinCenters(mData, allImageId, param):
     """
     param.pixelBinCenterDifferences = np.array([mat_dot(param.pixelBinCenters, param.pixelBinCenters, axis=1)]).T  # do the array of list of array trick to increase dimensionality of pixelBinCenterDiff  so that the transpose is actually different from the original array. 
     tilesForTraining = []   #(cont. above) this trick lets me broadcast it together with another array of different length in np.add()
-    for iImages in range(0, param.randFieldID.size): # for each 3d 3 channel image in the training set
-        ii = param.randFieldID[iImages]
-        slicekeys = list(mData[ii].keys())
-        d, param.fmt = getImageInformation(mData[ii][slicekeys[0]])
-        d[2] = len(mData[ii])
+    for id in param.randFieldID: # for each 3d 3 channel image in the training set
+        tmpmdata = mData.loc[mData[param.imageIDCol[0]]== id]
+        d = getImageInformation(tmpmdata, param.channelCol[0])
         param = getTileInfo(d, param)
-        tmpInfoTable = mData[ii]
-        superVoxelProfile, fgSuperVoxel, TASS = getTileProfiles(tmpInfoTable, param.pixelBinCenters, param, ii)
+        superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpmdata, param.pixelBinCenters, param)
         tmp = superVoxelProfile[fgSuperVoxel] 
         if tmp.size != 0:
             if len(tilesForTraining) == 0:
@@ -1282,6 +725,7 @@ def getSuperVoxelBinCenters(mData, allImageId, param):
     if len(tilesForTraining) == 0:
         print('\nNo foreground super-voxels found. consider changing parameters')
     param.supervoxelBincenters = getPixelBins(tilesForTraining, param.numSuperVoxelBins)
+    #below is just visualization.
     if param.showBincenters:
         toobig2show = False
         from phindr_clustering import sammon
@@ -1440,19 +884,11 @@ def getTileInfo(dimSize, param):
 
     param.numMegaVoxels = int((tmpX*tmpY*tmpZ) // (param.megaVoxelTileX*param.megaVoxelTileY*param.megaVoxelTileZ))
     param.numMegaVoxelsXY = int((tmpX*tmpY)/(param.megaVoxelTileX*param.megaVoxelTileY))
-
-    param.superVoxelRow = np.linspace(0, param.croppedX, num=int(param.croppedX/param.tileX + 1)).astype(int) #I think it should be integer because it seems like we will be indexing with this
-    param.superVoxelCol = np.linspace(0, param.croppedY, num=int(param.croppedY/param.tileY + 1)).astype(int)
-    param.superVoxelZ = np.linspace(0, param.croppedZ, num=int(param.croppedZ/param.tileZ + 1)).astype(int)
-
-    param.megaVoxelRow = np.linspace(0, param.croppedX, num=int(param.croppedX/param.megaVoxelTileX + 1)).astype(int)
-    param.megaVoxelCol = np.linspace(0, param.croppedY, num=int(param.croppedY/param.megaVoxelTileY + 1)).astype(int)
-    param.megaVoxelZ = np.linspace(0, param.croppedZ, num=int(param.croppedZ/param.megaVoxelTileZ + 1)).astype(int)
     
     return param
 
 #   getTileProfiles.m
-def getTileProfiles(filenames, pixelBinCenters, param, ii):
+def getTileProfiles(tmpmdata, pixelBinCenters, param):
     """called in extractImageLevelTextureFeatures"""
     """called in getMegaVoxelBinCenters"""
     """called in getSuperVoxelBinCenters"""
@@ -1476,20 +912,18 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
     zEnd = -param.zOffsetEnd
     if zEnd == -0:
         zEnd = None
-    slices = sorted(list(filenames.keys())) 
-    channelkeys = sorted(list(filenames[slices[0]].keys()))
+
+    slices = np.sort(tmpmdata[param.stackCol[0]].values) 
     slices = slices[param.zOffsetStart:zEnd] #keep z stacks that are divisible by stack count
     sliceCounter = 0
     startVal = 0
     endVal=numTilesXY
-
     startCol= 0
     endCol = param.tileX*param.tileY
     if param.intensityNormPerTreatment:
-        grpVal = np.argwhere(param.allTreatments == param.imageTreatments[ii])
+        grpVal = np.argwhere(param.allTreatments == tmpmdata[param.treatmentCol].values[0])
     superVoxelProfile = np.zeros((param.numSuperVoxels, param.numVoxelBins+1))
     fgSuperVoxel = np.zeros(param.numSuperVoxels)
-    # correct shape here.
     if param.computeTAS:
         categoricalImage = np.zeros((param.croppedX, param.croppedY, param.croppedZ))
     #loop over file names and extract super voxels
@@ -1498,15 +932,15 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
     for iImages, zslice in enumerate(slices):
         sliceCounter += 1
         croppedIM = np.zeros((param.origX, param.origY, param.numChannels)) #just one slice in all channels
-        for jChannels in range(0, param.numChannels):
+        for jChan in range(param.numChannels):
             try:
                 if param.intensityNormPerTreatment:
-                    croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[zslice][channelkeys[jChannels]], param.fmt), low=param.lowerbound[grpVal, jChannels], high=param.upperbound[grpVal, jChannels])
+                    croppedIM[:,:, jChan] = rescaleIntensity(io.imread(tmpmdata.loc[tmpmdata[param.stackCol[0]] == zslice, param.channelCol[jChan]].values[0], 'tif'), low=param.lowerbound[grpVal, jChan], high=param.upperbound[grpVal, jChan])
                 else:
-                    croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[zslice][channelkeys[jChannels]], param.fmt), low=param.lowerbound[jChannels], high=param.upperbound[jChannels])
+                    croppedIM[:,:, jChan] = rescaleIntensity(io.imread(tmpmdata.loc[tmpmdata[param.stackCol[0]] == zslice, param.channelCol[jChan]].values[0], 'tif'), low=param.lowerbound[jChan], high=param.upperbound[jChan])
             except Exception as e:
                 print(e)
-                print('Error: file ->', filenames[zslice][jChannels+1])
+                print('Error: file ->', filenames[zslice][jChan+1])
         xEnd = -param.xOffsetEnd
         if xEnd == -0:
             xEnd = None   #if the end index is -0, you just index from 1 to behind 1 and get an empty array. change to 0 if the dimOffsetEnd value is 0.
@@ -1515,6 +949,7 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
             yEnd = None
         #crop image to right dimensions for calculating supervoxels
         croppedIM = croppedIM[param.xOffsetStart:xEnd, param.yOffsetStart:yEnd, :] #z portion of the offset has already been done by not loading the wrong slices
+
         if param.showImage: 
             if param.showChannels or param.numChannels != 3:
                 fig, ax = plt.subplots(1, int(param.numChannels))
@@ -1525,10 +960,11 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
                     ax[i].set_yticks([])
             elif param.numChannels == 3:
                 plt.figure()
-                title = f'{ii} slice {zslice}'
+                title = f'slice {zslice}'
                 plt.title(title)
                 plt.imshow(croppedIM) #leaving it in multichannel gives rgb correctly for 3 channel image. WILL Fail for numChannel != 3
             plt.show()
+
         x = np.reshape(croppedIM, (param.croppedX*param.croppedY, param.numChannels)) #flatten image, keeping channel dimension separate   
         fg = np.sum(x > param.intensityThreshold, axis=1) >= 1 #want to be greater than threshold in at least 1 channel
         pixelCategory = np.argmin(np.add(param.pixelBinCenterDifferences, mat_dot(x[fg,:], x[fg,:], axis=1)).T - 2*(x[fg,:] @ pixelBinCenters.T), axis=1) + 1
@@ -1538,7 +974,6 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
         ## uncomment for testing if needed.
         # x_show = np.reshape(x, (param.croppedX, param.croppedY))
         # np.savetxt(r'C:\Users\teole\anaconda3\envs\phy479\pytvoxelim.csv', x_show, delimiter=',')
-
 
         #here, x can be reshaped to croppedX by croppedY and will give the map of pixel assignments for the image slice
         if param.computeTAS:
@@ -1564,83 +999,55 @@ def getTileProfiles(filenames, pixelBinCenters, param, ii):
         superVoxelProfile = superVoxelProfile[:, 1:]
     superVoxelProfile = np.divide(superVoxelProfile, np.array([np.sum(superVoxelProfile, axis=1)]).T) #dont worry about divide by zero errors, they are supposed to happen here!
     superVoxelProfile[superVoxelProfile == np.nan] = 0
-    if param.computeTAS:
-        TASScores = getCategoricalTASScores[categoricalImage, param.numVoxelBins]
-    else:
-        TASScores = np.zeros((1, 27*param.numVoxelBins))
     fgSuperVoxel = fgSuperVoxel.astype(bool)
-    return superVoxelProfile, fgSuperVoxel, TASScores #TASScores is optional #fgSuperVoxel used to be fgSuperVoxel.T
+    return superVoxelProfile, fgSuperVoxel ##fgSuperVoxel used to be fgSuperVoxel.T
 
 #   getTrainingfields.m
-def getTrainingFields(metaInfo, param, allImageId, treatmentColumn):
+def getTrainingFields(metadata, param):
     """
     called in getScalingFactorforImages
 
     get smaller subset of images (usually 10) to define parameters for further analysis
         (nly used for scaling factors to scale down intensities from 0 to 1)
     """
-    uniqueImageID = np.array(allImageId, dtype='object') #all image ID is currently a list of image ids (for 3d images)
-    randomImage = False
-    if len(allImageId) == 0:
-        randomImage = True
-    if len(treatmentColumn) == 0: #can use len instead of size as in original code because it should be a column vector
-        randomImage = True
-    if randomImage:
+    uniqueImageID = np.unique(metadata[param.imageIDCol])
+    if not param.intensityNormPerTreatment:
         randFieldID = np.array([uniqueImageID[i] for i in Generator.choice(uniqueImageID.size, size=param.randTrainingFields, replace=False, shuffle=False)])
     else:
         #have different treatments, want to choose training images from each treatment.
-        numtreatments = len(param.allTreatments)
+        uTreat = np.unique(metadata[param.treatmentCol].values)
+        numtreatments = len(uTreat)
         param.randTrainingPerTreatment = -(-param.randTrainingFields//numtreatments) #ceiling division
         randFieldID = []
-        for i in range(0, numtreatments):
-            tmp = treatmentColumn[param.allTreatments[i]] #all image IDs corresponding to this treatment
-            randFieldID = randFieldID + [tmp[j] for j in Generator.choice(len(tmp), size=param.randTrainingPerTreatment, replace=False, shuffle=False)]
+        for treat in uTreat:
+            treatmentIDs = np.unique(metadata.loc[metadata[param.treatmentCol[0]] == treat, param.imageIDCol])  #all image IDs corresponding to this treatment
+            randFieldID = randFieldID + [treatmentIDs[j] for j in Generator.choice(len(treatmentIDs), size=param.randTrainingPerTreatment, replace=False, shuffle=False)]
         randFieldID = np.array(randFieldID)
-    treatmentValues = [] #each randfield image -> which treatment does it have?
-    for i in range(0, randFieldID.size):
-        if not randomImage:
-            treatmentValues.append(param.imageTreatments[randFieldID[i]])
-        else:
-            treatmentValues.append('RR')
-    return randFieldID, np.array(treatmentValues) #randFieldID is a list of indices of images to choose
+    return randFieldID 
 
 #   getTrainingPixels.m
-def getTrainingPixels(filenames, param, ii):
+def getTrainingPixels(tmpmdata, param):
     """called in getPixelBinCenters"""
     """
-    filenames is dict of slices and channels {slice1:{chans}, slice2:{chans}, ...}
+    tmpmdata is truncated metadata dataframe, limited to a single image id
     param is param file
     ii is the image ID for the image that was passed in.
     """
-    slices = sorted(list(filenames.keys()))
-    channelkeys = sorted(list(filenames[slices[0]].keys())) #channels
+    slices = tmpmdata[param.stackCol[0]].values
     #uncomment this row for proper function.
-    # slices = np.array([slices[i] for i in Generator.choice(len(slices), size=param.randZForTraining, replace=False, shuffle=False)]) #shuffle the slices
+    slices = np.array([slices[i] for i in Generator.choice(len(slices), size=param.randZForTraining, replace=False, shuffle=False)]) #shuffle the slices
     trPixels = np.zeros((param.pixelsPerImage*param.randZForTraining, param.numChannels))
     startVal = 0
     if param.intensityNormPerTreatment:
-        grpVal = np.argwhere(param.allTreatments == param.imageTreatments[ii])
+        grpVal = np.argwhere(param.allTreatments == tmpmdata[param.treatmentCol].values[0])
     slices = slices[0:(len(slices)//2)] ###################### revert by removing the :3]#
     for zplane in slices:
         croppedIM = np.zeros((param.origX, param.origY, param.numChannels))
-        ######These lines were in place because of false assumptions due to being sent maximum intensity images insteado of 3D images.
-            ## Should work, but skips the image cropping step.
-        # if param.intensityNormPerTreatment:
-        #     im0 = rescaleIntensity(io.imread(zslices[iImages][1], param.fmt), low=param.lowerbound[grpVal, 0], high=param.upperbound[grpVal, 0])
-        # else:
-        #     im0 = rescaleIntensity(io.imread(zslices[iImages][1], param.fmt), low=param.lowerbound[0], high=param.upperbound[0])
-        # croppedIM = np.zeros((im0.size, param.numChannels))
-        # croppedIM[:, 0] = np.ravel(im0) #load things pre-flattened since there is no point to cropping here yet.
-        for jChannels in range(0, param.numChannels):
-            ############## same here as last comment above.
-            # if param.intensityNormPerTreatment:
-            #     croppedIM[:, jChannels] = np.ravel(rescaleIntensity(io.imread(zslices[iImages][jChannels+1], param.fmt), low=param.lowerbound[grpVal, jChannels], high=param.upperbound[grpVal, jChannels]))
-            # else:
-            #     croppedIM[:, jChannels] = np.ravel(rescaleIntensity(io.imread(zslices[iImages][jChannels+1], param.fmt), low=param.lowerbound[jChannels], high=param.upperbound[jChannels]))
+        for jChan in range(param.numChannels):
             if param.intensityNormPerTreatment:
-                croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[zplane][channelkeys[jChannels]], param.fmt), low=param.lowerbound[grpVal, jChannels], high=param.upperbound[grpVal, jChannels])
+                croppedIM[:,:, jChan] = rescaleIntensity(io.imread(tmpmdata.loc[tmpmdata[param.stackCol[0]] == zplane, param.channelCol[jChan]].values[0], 'tif'), low=param.lowerbound[grpVal, jChan], high=param.upperbound[grpVal, jChan])
             else:
-                croppedIM[:,:, jChannels] = rescaleIntensity(io.imread(filenames[zplane][channelkeys[jChannels]], param.fmt), low=param.lowerbound[jChannels], high=param.upperbound[jChannels])
+                croppedIM[:,:, jChan] = rescaleIntensity(io.imread(tmpmdata.loc[tmpmdata[param.stackCol[0]] == zplane, param.channelCol[jChan]].values[0], 'tif'), low=param.lowerbound[jChan], high=param.upperbound[jChan])
         #crop parameters
         xEnd = -param.xOffsetEnd
         if xEnd == -0:
@@ -1669,60 +1076,6 @@ def initParameters():
     """
     param = param_class()
     return param
-
-#   mergeChannels.m
-def mergeChannels(imMultiChannel, colors):
-    shape = imMultiChannel.shape
-    im3D = np.zeros(shape)
-    for jChannels in range(0, shape[2]):
-        maxVal = np.max(imMultiChannel[:, :, jChannels])
-        minVal = np.min(imMultiChannel[:, :, jChannels])
-        maxMin = np.abs(maxVal - minVal)
-        im = (imMultiChannel[:, :, jChannels] - minVal)/maxMin
-        im[im>1] = 1
-        im[im<0] = 0
-        im3D[:, :, 0] = im3D[:, :, 0] + colors[jChannels, 0]*im
-        im3D[:, :, 1] = im3D[:, :, 1] + colors[jChannels, 2]*im
-        im3D[:, :, 2] = im3D[:, :, 2] + colors[jChannels, 3]*im
-    return im3D
-
-#   ParseMetadataFile.m
-def parseMetaDataFile(metadatafilename):
-    """called in getPixelBinCenters"""
-    mData = []
-    chanInfo = {} #since we call attributes/cell labels: try to use dictionary
-    header = [] #all three of these are set up as cells
-    try:
-        with open(metadatafilename, mode='r+') as fid: #no truncation
-            header = fid.readline().strip() #first line with leading and trailing whitespaces removed.
-        header = regexpi(header, r'\t', fmt='split')
-        if header != 'ImageID':
-            print('\nERROR: please choose appropriate metadata file. \nThings will probably crash after this.\n\n')
-            return None
-        with open(metadatafilename) as fid:
-            tmp = np.loadtxt(fid, delimiter='\t', skiprows=1, dtype={'names': [f'col{i}' for i in range(0, header.size)], 'formats': ['S4' for i in range(0, header.size)]} )
-    except Exception as e:
-        print(e)
-        print('\nERROR reading metadata file did not work.\n\n')
-    for i in range(0, tmp.shape[1]):
-        mData.append(tmp[0, i]) #may or may not work properly.
-    chanInfo['channelColNumber'] = input('Select channels (type indices of choice separated by spaces) :').split() #list dialog box pops up. shows options of list of header entries, allows multiple selection mode, prompts to select channels. returns indices of selected channels in header.
-    chanInfo['channelColNumber'] = np.array([int(elem) for elem in chanInfo['channelColNumber']]) #array form of list of str numbers converted to int. (lets try this for now, seems close enough)
-    chanInfo['channelNames'] = header[0, chanInfo['channnelColNumber']]
-    chanInfo['channelColors'] = [f'color{i+1}' for i in range(0, chanInfo['channelColNumber'].size)]
-    ii = header == 'ImageID' #should be case insensitive though
-    imageID = mData[:, ii].astype(np.float64)
-    stackCol = np.logical_or((header == 'Stacks'), (header == 'Stacks')) #should also be case insensitive unfortunately
-    uImageID = np.unique(imageID)
-    for i in range(0, uImageID.size):
-        ii = imageID == uImageID[i]
-        kk = mData[ii, stackCol].astype(np.float64)
-        tmp = mData[ii, :]
-        kk = np.argsort(kk)
-        mData[ii, :] = tmp[kk, :]
-    ii = header == 'ImageID' #also needs to be case insensitive
-    imageID = mData[:, ii].astype(np.uint8) #hope this works, might need to do as list comprehension instead
-    return mData, imageID, header, chanInfo
 
 #   rescaleIntensity.m
 def rescaleIntensity(im, low=0, high=1):
@@ -1755,71 +1108,36 @@ def selectPixelsbyweights(x):
 
 ####  NEVER USED ############
 #   setImageView.m  
-def setImageView(imageFileNames, channelColorValue, selectedViewType, selectedChannels, axisHandle):
-    """
-    sets up viewing for selected images
-    has some imshow calls, with parameters changed to show with desired view setting
-    low-key is gui related
-    """
-    imageFileNames = imageFileNames[:, selectedChannels]
-    channelColorValue = channelColorValue[selectedChannels.T, :] #transpose propably not needed
-    imageInfo = imfinfo(imageFileNames[0, 0])
-    (m, n) = imageFileNames.shape
-    if m == 1:
-        selectedViewType = 'Slice'
-    if (selectedViewType == 'Slice') or (selectedViewType == 'MIP'):
-        image2Show = np.zeros((imageInfo.height, imageInfo.Width, np.sum(selectedChannels)))
-        for i in range(0, n):
-            image2Show[:, :, i] = getMIPImage(imageFileNames[:, i])
-        image2Show = mergeChannels(image2Show, channelColorValue)
-        plt.figure()
-        plt.imshow(image2Show)
-        plt.show()
-    elif selectedViewType == 'Montage':
-        image2Show = np.zeros((imageInfo.Height, imageInfo.Width, 3, imageFileNames.shape[0]))
-        for i in range(0, m):
-            imtmp = np.zeros((imageInfo.height, imageInfo.Width, np.sum(selectedChannels)))
-            for j in range(0, n):
-                imtmp[:, :, j] = io.imread(imageFileNames[i, j], imageInfo.Format)
-            image2Show[:, :, :, i] = mergeChannels(imtmp, channelColorValue)
-        plt.figure() #one big figure with many smaller subplots inside could be ok, montage seems to just tile images together ~ similar to subplots
-        for i in range(1, m*n): #i think starting at 1 is ok, but will have to see
-            plt.subplot(m, n, i)
-            plt.imshow(image2Show[:, :, :, i])
-            plt.xticks([])
-            plt.yticks([])
-        plt.show()
-    return None
 
+#   getGroupIndices.m
+
+#NOT Called.
+#   getImageIDfromMetadata.m
+
+# never used
+#   AssignTilestoBins.m
+
+# never used
+#   equalTrainingSamplePartition.m
+
+# never used/not needed by me
+#   getExtractedMetadata.m
+
+
+## never used
+#   findClosestPoint2Line.m
+
+## never used
+#   getDistancePointFromLine.m
+
+# Never called
+#   getImageWithSVMVOverlay.m
+
+## never used
 #   writestr.m
-def writestr(fname, data, wflag):
-    """
-    % function to write a matrix to a file
-    % usage flag=writedat(filename,data,write_flag)
-    """
-    n = data.shape
-    flag = 1
-    if n > 0:
-        try:
-            if wflag == 'Append':
-                fid = open(fname, mode='a+')
-            elif wflag == 'Overwrite':
-                fid = open(fname, mode='w+')
-            else:
-                #matlab code has a condition to see if: exist(fname, 'file') != False. not sure why this is that
-                fid = open(fname, mode='w+')
-        except Exception as e:
-            print()
-            print('ERROR problem opening file for writing')
-            print(e)
-            print()
-            return None
-    for i in range(0, n[0]):
-        print('\n' + data[i, :].strip())
-    fid.close()
-    return flag
 
-
+#never used (i think it's related to getting specific image from the view results window.)
+#   getImage2Display.m
 
 #need to find these ones
 
@@ -1828,84 +1146,30 @@ def writestr(fname, data, wflag):
 #     """function not defined in lib, third party/clustering, organoidCSApp folders"""
 #     return metadataLabel, unknown, unknown, imageIDLabel
 
-def getCategoricalTASScores(categoricalImage, numVoxelBins):
-    """called in getTileProfiles"""
-    return None
-
-
+#never used
+# getCategoricalTASScores
 
 
 #gui function to fill in later:
 
 #   PhinDR3D_Main.m
-#    seems to be mostly gui stuff (lots of callbacks (function that executes on predefined action), calls to other functions to set things up)
-def PhinDR3D_Main():
-    return None
 
 #   PhindrViewer.m
-#     again, seems to be mostly gui stuff, img viewing i think. some functions to save cluster results to file.
-def PhindrViewer():
-    return None
 
 #   colorpicker.m
-def colorpicker():
-    #gui stuff, I am pretty sure this lets the user pick what color is used to display each channel.
-    #go back to later as needed.
-    return None
 
 #   findjobj.m
 #      very intense gui stuff. apparently matlab gui is built on java, this matlab function does works through handles, other gui things 
 #      straight up gui building, user interactions, etc.
 
 #   imageViewer.m
-def imageViewer():
-    return None
 
 #   metadataExtractor.m
-def metadataExtractor():
-    return None
 
 #   setChannelInformation
-def setChannelInformation(boxHandle, channelNames, channelColors, selectedChannels):
-    """
-    function seems to be gui related, should display information about the different channels
-    related to boxHandle function of gui.
-    """
-    return None
 
 #   setParameterValues.m
-def setParametervalues(handles, param):
-    """
-    sets attributes in handles to specific values in param. won't touch this yet.
-    may or may not be interface related
-    """
-    return None
 
-#   setParameters.m
-def setParameters(input):
-    """GUI stuff. calls setParameterValues"""
-    return None
-
-#   setTextInformation.m
-def setTextInformation(textHandle, imageFileName, channelNames, channelColors, selectedChannels, projectionType):
-    """set text things on interface"""
-    return None
-
-#   updateAxisImage.m
-def updateAxisImage(axisHandle, image2Display, typeOfview):
-    """gui stuff, updates image to be displayed in specified axis"""
-    return None
-
-#   updateAxisPlot.m
-def updateAxisPlot(data, groupValues, colorValues, axisHandle):
-    """more gui stuff, update plots of data and groupValues that we are supposed to be plotting"""
-    return None
-
-#   viewScatterPie2.m
-def viewScatterPie2(x, y, yhat, map, uY, uYhat):
-    """plots data in x using groupings in y with colors in yhat"""
-    """show scatter plot of pie plots i guess? there are scatterplots of pie plots in phindr paper"""
-    return None
 
 
 
