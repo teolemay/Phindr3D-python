@@ -299,7 +299,7 @@ def getImageProfile(megaVoxelProfile, fgMegaVoxel, param):
         texture_features = np.mean(total_mean_textures, axis=0)
         if texture_features.size == 0:
             param.texture_features = False
-            print(f'Texture feature extraction failed for image {imagename}. continuing with default phindr3D')
+            print(f'Texture feature extraction failed. continuing with default phindr3D')
             texture_features = None
     else:
         texture_features = None
@@ -940,8 +940,6 @@ def getTileProfiles(tmpmdata, pixelBinCenters, param):
                     croppedIM[:,:, jChan] = rescaleIntensity(io.imread(tmpmdata.loc[tmpmdata[param.stackCol[0]] == zslice, param.channelCol[jChan]].values[0], 'tif'), low=param.lowerbound[jChan], high=param.upperbound[jChan])
             except Exception as e:
                 print(e)
-                print('Error: file ->', filenames[zslice][jChan+1])
-        xEnd = -param.xOffsetEnd
         if xEnd == -0:
             xEnd = None   #if the end index is -0, you just index from 1 to behind 1 and get an empty array. change to 0 if the dimOffsetEnd value is 0.
         yEnd = -param.yOffsetEnd
