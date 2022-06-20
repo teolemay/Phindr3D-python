@@ -288,7 +288,8 @@ def getfsimage(imdata, channel):
     """
     % getfsimage - Outputs best focussed image from a set of 3D image slices
     % Input:
-    % fnames - 3D image file names
+    % imdata: metadata for a single image id
+    % channel: segmentation channel column header
     % Output:
     % final_image: Best focussed image
     """
@@ -300,6 +301,37 @@ def getfsimage(imdata, channel):
     finalImage = np.zeros((imInfo.Height, imInfo.Width))
     for z in zVals:
         IM = io.imread(imdata.loc[imdata['Stack']==z, channel].values[0]).astype(np.float64)
+        imtmp = stdfilt(IM, kernel_size=5)
+        xgrad = ndimage.sobel(imtmp, axis=0) #directional gradients
+        ygrad = ndimage.sobel(imtmp, axis=1)
+        tmp = np.sqrt( (xgrad*xgrad) + (ygrad*ygrad) ) #gradient magnitude
+        ii = (tmp >= prevImage)
+        focusIndex[ii] = z
+        finalImage[ii] = IM[ii]
+        prevImage = np.maximum(tmp, prevImage)
+    return finalImage, focusIndex
+
+def getfsimage_multichannel(imdata, allChannels):
+    """
+    % getfsimage - Outputs best focussed image from a set of 3D image slices
+    % Input:
+    % imdata: metadata for a single image id
+    % allChannels: channel column header (all channels)
+    % Output:
+    % final_image: Best focused image
+    """
+    zVals = np.unique(imdata['Stack'])
+    #want to end up with fnames == images from single channel being read in stack order.
+    imInfo = ph.imfinfo( imdata.loc[imdata['Stack']==zVals[0], allChannels[0]].values[0])
+    prevImage = np.full((imInfo.Height, imInfo.Width), -1*np.inf)
+    focusIndex = np.zeros((imInfo.Height, imInfo.Width))
+    finalImage = np.zeros((imInfo.Height, imInfo.Width))
+    for z in zVals:
+        for i in range(len(allChannels)):
+            if i == 0:
+                IM = io.imread(imdata.loc[imdata['Stack']==z, allChannels[i]].values[0]).astype(np.float64)
+            else:
+                IM = np.maximum(IM, io.imread(imdata.loc[imdata['Stack']==z, allChannels[i]].values[0]).astype(np.float64))
         imtmp = stdfilt(IM, kernel_size=5)
         xgrad = ndimage.sobel(imtmp, axis=0) #directional gradients
         ygrad = ndimage.sobel(imtmp, axis=1)
