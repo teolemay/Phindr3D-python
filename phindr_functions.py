@@ -278,7 +278,7 @@ def getImageProfile(megaVoxelProfile, fgMegaVoxel, param):
         for i in range(mv_image.shape[0]):
             texture_features = np.full((3, 13), np.nan)
             try:
-                texture_features[1, :] = mt.features.haralick(mv_image[i, :, :], distance=1, ignore_zeros=True, return_mean=True)
+                texture_features[0, :] = mt.features.haralick(mv_image[i, :, :], distance=1, ignore_zeros=True, return_mean=True)
             except ValueError:
                 pass
             try:
