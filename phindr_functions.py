@@ -25,6 +25,7 @@ import mahotas as mt
 #my own functions:
 
 Generator = np.random.default_rng()
+np.seterr(divide='ignore')
 
 def random_cmap(map_len=40, black_background=True):
     """
@@ -186,9 +187,9 @@ def extractImageLevelTextureFeatures(mData, param, outputFileName='imagefeatures
         tmpmdata = mData.loc[mData[param.imageIDCol[0]] == id]
         d = getImageInformation(tmpmdata , param.channelCol[0])
         param = getTileInfo(d, param)
-        superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpmdata, param.pixelBinCenters, param)
-        megaVoxelProfile, fgMegaVoxel = getMegaVoxelProfile(superVoxelProfile, fgSuperVoxel, param)
-        imgProfile, rawProfile, texture_features = getImageProfile(megaVoxelProfile, fgMegaVoxel, param)
+        superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpmdata, param.pixelBinCenters, param, analysis=True)
+        megaVoxelProfile, fgMegaVoxel, texture_features = getMegaVoxelProfile(superVoxelProfile, fgSuperVoxel, param, analysis=True)
+        imgProfile, rawProfile = getImageProfile(megaVoxelProfile, fgMegaVoxel, param)
         resultIM[iImages, :] = imgProfile
         resultRaw[iImages, :] = rawProfile
         if param.textureFeatures: 
@@ -272,44 +273,45 @@ def getImageProfile(megaVoxelProfile, fgMegaVoxel, param):
             plt.show()
             # np.savetxt(r'C:\Users\teole\anaconda3\envs\phy479\pytmvim.csv', mv_show[i, :, :], delimiter=',') ################ pixel pixel comparisons
 
-    if param.textureFeatures: ###########lets put this here. 
-        mv_image = np.reshape(x, (param.numMegaVoxelZ, param.numMegaVoxelX, param.numMegaVoxelY))
-        total_mean_textures = np.full((param.numMegaVoxelZ, 4), np.nan)
-        for i in range(mv_image.shape[0]):
-            texture_features = np.full((3, 13), np.nan)
-            try:
-                texture_features[0, :] = mt.features.haralick(mv_image[i, :, :], distance=1, ignore_zeros=True, return_mean=True)
-            except ValueError:
-                pass
-            try:
-                texture_features[1, :] = mt.features.haralick(mv_image[i, :, :], distance=2, ignore_zeros=True, return_mean=True)
-            except ValueError:
-                pass
-            try:
-                texture_features[2, :] = mt.features.haralick(mv_image[i, :, :], distance=3, ignore_zeros=True, return_mean=True)
-            except ValueError:
-                pass
-            texture_features = texture_features[:, [0, 8, 11, 12]]
-            texture_features = texture_features[~np.isnan(texture_features).any(axis=1), :]
-            if len(texture_features) > 1:
-                texture_features = np.mean(texture_features, axis=0)
-            if texture_features.size > 0:
-                total_mean_textures[i, :] = texture_features
-        total_mean_textures = total_mean_textures[~np.isnan(total_mean_textures).any(axis=1), :]
-        texture_features = np.mean(total_mean_textures, axis=0)
-        if texture_features.size == 0:
-            param.texture_features = False
-            print(f'Texture feature extraction failed. continuing with default phindr3D')
-            texture_features = None
-    else:
-        texture_features = None
+    # if param.textureFeatures: ###########lets put this here. 
+    #     mv_image = np.reshape(x, (param.numMegaVoxelZ, param.numMegaVoxelX, param.numMegaVoxelY))
+    #     total_mean_textures = np.full((param.numMegaVoxelZ, 4), np.nan)
+    #     for i in range(mv_image.shape[0]):
+    #         texture_features = np.full((3, 13), np.nan)
+    #         try:
+    #             texture_features[1, :] = mt.features.haralick(mv_image[i, :, :], distance=1, ignore_zeros=True, return_mean=True)
+    #         except ValueError:
+    #             pass
+    #         try:
+    #             texture_features[1, :] = mt.features.haralick(mv_image[i, :, :], distance=2, ignore_zeros=True, return_mean=True)
+    #         except ValueError:
+    #             pass
+    #         try:
+    #             texture_features[2, :] = mt.features.haralick(mv_image[i, :, :], distance=3, ignore_zeros=True, return_mean=True)
+    #         except ValueError:
+    #             pass
+    #         texture_features = texture_features[:, [0, 8, 11, 12]]
+    #         texture_features = texture_features[~np.isnan(texture_features).any(axis=1), :]
+    #         if len(texture_features) > 1:
+    #             texture_features = np.mean(texture_features, axis=0)
+    #         if texture_features.size > 0:
+    #             total_mean_textures[i, :] = texture_features
+    #     total_mean_textures = total_mean_textures[~np.isnan(total_mean_textures).any(axis=1), :]
+    #     texture_features = np.mean(total_mean_textures, axis=0)
+    #     if texture_features.size == 0:
+    #         param.texture_features = False
+    #         print(f'Texture feature extraction failed. continuing with default phindr3D')
+    #         texture_features = None
+    # else:
+    #     texture_features = None
+
     if not param.countBackground:
         rawProfile = imageProfile[1:].copy()
         imageProfile = imageProfile[1:]
     else:
         rawProfile = imageProfile.copy()
     imageProfile = imageProfile / np.sum(imageProfile) #normalize the image profile
-    return imageProfile, rawProfile, texture_features
+    return imageProfile, rawProfile #, texture_features
 
 #   getImageThreshold.m
 def getImageThreshold(IM):
@@ -405,8 +407,8 @@ def getMegaVoxelBinCenters(mData, param):
         tmpmdata = mData.loc[mData[param.imageIDCol[0]] == id]
         d = getImageInformation(tmpmdata, param.channelCol[0])
         param = getTileInfo(d, param)
-        superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpmdata, param.pixelBinCenters, param)
-        megaVoxelProfile, fgMegaVoxel = getMegaVoxelProfile(superVoxelProfile, fgSuperVoxel, param)
+        superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpmdata, param.pixelBinCenters, param, analysis=False)
+        megaVoxelProfile, fgMegaVoxel = getMegaVoxelProfile(superVoxelProfile, fgSuperVoxel, param, analysis=False)
         if len(MegaVoxelsforTraining) == 0:
             MegaVoxelsforTraining = megaVoxelProfile[fgMegaVoxel]
         else:
@@ -448,7 +450,7 @@ def getMegaVoxelBinCenters(mData, param):
     return param
 
 #   getMegaVoxelProfile.m
-def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param):
+def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param, analysis=False):
     """called in extractImageLevelTextureFeatures"""
     """called in getMegaVoxelBinCenters"""
     temp1 = np.array([mat_dot(param.supervoxelBincenters, param.supervoxelBincenters, axis=1)]).T
@@ -469,6 +471,34 @@ def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param):
             plt.colorbar()
             plt.show()
             # np.savetxt(r'C:\Users\teole\anaconda3\envs\phy479\pytsvim.csv', x[i, :, :], delimiter=',') ################ pixel pixel comparisons
+    if analysis and param.textureFeatures:
+        sv_image = np.reshape(x, (int(param.croppedZ/param.tileZ), int(param.croppedX/param.tileX), int(param.croppedY/param.tileY)))
+        param.numSuperVoxelZ = int(param.croppedZ/param.tileZ)
+        total_mean_textures = np.full((param.numSuperVoxelZ, 4), np.nan)
+        for i in range(sv_image.shape[0]):
+            texture_features = np.full((2, 13), np.nan)
+            try:
+                texture_features[0, :] = mt.features.haralick(sv_image[i, :, :], distance=1, ignore_zeros=True, return_mean=True)
+            except ValueError:
+                pass
+            try:
+                texture_features[1, :] = mt.features.haralick(sv_image[i, :, :], distance=2, ignore_zeros=True, return_mean=True)
+            except ValueError:
+                pass
+            texture_features = texture_features[:, [0, 8, 11, 12]]
+            texture_features = texture_features[~np.isnan(texture_features).any(axis=1), :]
+            if len(texture_features) > 1:
+                texture_features = np.mean(texture_features, axis=0)
+            if texture_features.size > 0:
+                total_mean_textures[i, :] = texture_features
+        total_mean_textures = total_mean_textures[~np.isnan(total_mean_textures).any(axis=1), :]
+        textureFeatures = np.mean(total_mean_textures, axis=0)
+        if texture_features.size == 0:
+            param.texture_features = False
+            print(f'Texture feature extraction failed. continuing with default phindr3D')
+            textureFeatures = None
+    else:
+        textureFeatures = None
 
     #pad first dimension 
     x = np.concatenate([ np.zeros((param.superVoxelZAddStart, x.shape[1], x.shape[2])), x, np.zeros((param.superVoxelZAddEnd, x.shape[1], x.shape[2])) ], axis=0) #new (z, x, y) shape
@@ -512,10 +542,10 @@ def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param):
         megaVoxelProfile = megaVoxelProfile[:, 1:]
     megaVoxelProfile = np.divide(megaVoxelProfile, np.array([np.sum(megaVoxelProfile, axis=1)]).T) #dont worry about divide by zero here either
     fgMegaVoxel = fgMegaVoxel.astype(bool) 
-    return megaVoxelProfile, fgMegaVoxel
-
-# Never used
-#   getMerged3DImage.m
+    if analysis:
+        return megaVoxelProfile, fgMegaVoxel, textureFeatures
+    else:     
+        return megaVoxelProfile, fgMegaVoxel
 
 #   getPixelBinCenters.m
 def getPixelBinCenters(mData, param):
@@ -712,7 +742,7 @@ def getSuperVoxelBinCenters(mData, param):
         tmpmdata = mData.loc[mData[param.imageIDCol[0]]== id]
         d = getImageInformation(tmpmdata, param.channelCol[0])
         param = getTileInfo(d, param)
-        superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpmdata, param.pixelBinCenters, param)
+        superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpmdata, param.pixelBinCenters, param, analysis=False)
         tmp = superVoxelProfile[fgSuperVoxel] 
         if tmp.size != 0:
             if len(tilesForTraining) == 0:
@@ -888,7 +918,7 @@ def getTileInfo(dimSize, param):
     return param
 
 #   getTileProfiles.m
-def getTileProfiles(tmpmdata, pixelBinCenters, param):
+def getTileProfiles(tmpmdata, pixelBinCenters, param, analysis=False):
     """called in extractImageLevelTextureFeatures"""
     """called in getMegaVoxelBinCenters"""
     """called in getSuperVoxelBinCenters"""
@@ -940,6 +970,7 @@ def getTileProfiles(tmpmdata, pixelBinCenters, param):
                     croppedIM[:,:, jChan] = rescaleIntensity(io.imread(tmpmdata.loc[tmpmdata[param.stackCol[0]] == zslice, param.channelCol[jChan]].values[0], 'tif'), low=param.lowerbound[jChan], high=param.upperbound[jChan])
             except Exception as e:
                 print(e)
+        xEnd = -param.xOffsetEnd
         if xEnd == -0:
             xEnd = None   #if the end index is -0, you just index from 1 to behind 1 and get an empty array. change to 0 if the dimOffsetEnd value is 0.
         yEnd = -param.yOffsetEnd
@@ -1108,6 +1139,10 @@ def selectPixelsbyweights(x):
 #   setImageView.m  
 
 #   getGroupIndices.m
+
+
+# Never used
+#   getMerged3DImage.m
 
 #NOT Called.
 #   getImageIDfromMetadata.m
