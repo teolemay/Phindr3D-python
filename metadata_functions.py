@@ -25,11 +25,10 @@ def createMetadata(folder_path, regex, mdatafilename='metadata_python.txt'):
     metadatafilename = f'{os.path.abspath(folder_path)}\\{mdatafilename}'
     #read images in folder
     rows = []
-    for i, file in enumerate(f):
+    for file in f:
         m = re.fullmatch(regex, file)
         if m != None:
             d = m.groupdict()
-            d['_file'] = os.path.abspath(f'{folder_path}\\{file}')
             rows.append(d)
     #make sure rows is not empty and that Channel and Stack are in the groups.
     if len(rows) == 0:
@@ -38,22 +37,22 @@ def createMetadata(folder_path, regex, mdatafilename='metadata_python.txt'):
     if ('Channel' not in rows[0].keys()) or ('Stack' not in rows[0].keys()):
         print('\nFailed to create metadata. regex must contain "Channel" and "Stack" groups.')
         return None
-    tmpdf = pd.DataFrame(rows)  
+    tmpdf = pd.DataFrame(rows)
     #make new dataframe with desired colummns
-    tags = tmpdf.columns
+    tags = tmpdf.columns #tags is columns from the regex.
     channels = np.unique(tmpdf['Channel'])
     cols = []
     for chan in channels:
         cols.append(f'Channel_{chan}')
     for tag in tags:
-        if tag not in ['Channel', 'Stack', '_file']:
+        if tag not in ['Channel', 'Stack']:
             cols.append(tag)
     cols.append('Stack')
     cols.append('MetadataFile')
     df = pd.DataFrame(columns=cols)
     #add data to the new dataframe
-    stacksubset = [tag for tag in tags if tag not in ['Channel', '_file']]
-    idsubset = [tag for tag in tags if tag not in ['Channel', '_file', 'Stack']]
+    stacksubset = [tag for tag in tags if tag not in ['Channel']]
+    idsubset = [tag for tag in tags if tag not in ['Channel', 'Stack']]
     df[stacksubset] = tmpdf.drop_duplicates(subset = stacksubset)[stacksubset]
     df.reset_index(inplace=True, drop=True)
     #add unique image ids based on the "other tags"
@@ -65,9 +64,20 @@ def createMetadata(folder_path, regex, mdatafilename='metadata_python.txt'):
     #give metadatafilename
     df['MetadataFile'] = metadatafilename
     # fill in file paths for each channel
-    for chan in channels:
-        chandf = tmpdf[tmpdf['Channel']==chan].reset_index(drop=True)
-        df[f'Channel_{chan}'] = chandf['_file']
+    fileparts = re.split(r'\(\?P<\w+>\\\w\+?\)', regex) #split the regex around all the capturing groups.
+    for index, row in df.iterrows(): #iterate through the rows of the df to re-get capturing group info 
+        for chan in channels:        #also have to go through the channels to get channel info
+            fname = ''
+            for i, dkey in enumerate(d.keys()): #build the expected filename back up from the split regex.
+                fname += fileparts[i]
+                if dkey == 'Channel':
+                    fname += str(chan)
+                else:
+                    fname += row[dkey]
+            fname += fileparts[i+1] #add the .tif(f)
+            df.iat[index, df.columns.get_loc(f'Channel_{chan}')] = os.path.abspath(f'{folder_path}\\{fname}') #place the name at the right spot
+        # chandf = tmpdf[tmpdf['Channel']==chan].reset_index(drop=True)
+        # df[f'Channel_{chan}'] = chandf['_file']
     df.to_csv(metadatafilename, sep='\t', index=False)
     print(f'Metadata file created at \n{metadatafilename}')
     return metadatafilename
