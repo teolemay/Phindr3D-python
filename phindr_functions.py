@@ -561,7 +561,7 @@ def getPixelBinCenters(mData, param):
     pixelsForTraining = np.zeros((300000, param.numChannels)) # long array [channel 1[very long zeros...], channel2[very long zeros...], channel3[very long zeros ...]] by 3 channels
     startVal = 0
     endVal = 0
-    for id in param.randFieldID: #for each i in range (length of training image set)  #image name
+    for i, id in enumerate(param.randFieldID): #for each i in range (length of training image set)  #image name
         tmpmdata = mData.loc[mData[param.imageIDCol[0]] == id]
         d = getImageInformation(tmpmdata, param.channelCol[0])
         param = getTileInfo(d, param)
@@ -1069,7 +1069,7 @@ def getTrainingPixels(tmpmdata, param):
     startVal = 0
     if param.intensityNormPerTreatment:
         grpVal = np.argwhere(param.allTreatments == tmpmdata[param.treatmentCol].values[0])
-    slices = slices[0:(len(slices)//2)] ###################### revert by removing the :3]#
+    slices = slices[0:(len(slices)//2)]
     for zplane in slices:
         croppedIM = np.zeros((param.origX, param.origY, param.numChannels))
         for jChan in range(param.numChannels):
