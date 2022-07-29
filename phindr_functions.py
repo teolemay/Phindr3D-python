@@ -163,7 +163,7 @@ def im2col(img, blkShape):
 #functions that we seem to need (only start with calculation functions, no gui stuff).
 
 #   extractImageLevelTextureFeatures.m
-def extractImageLevelTextureFeatures(mData, param, outputFileName='imagefeatures.csv', outputDir=''):
+def extractImageLevelTextureFeatures(mData, param, identitycols, outputFileName='imagefeatures.csv'):
     if param.countBackground:
         totalBins = param.numMegaVoxelBins + 1
     else:
@@ -171,18 +171,23 @@ def extractImageLevelTextureFeatures(mData, param, outputFileName='imagefeatures
     uniqueImageID = np.unique(mData[param.imageIDCol])
     resultIM = np.zeros((len(uniqueImageID), totalBins)) #for all images: put megavoxel frequencies
     resultRaw = np.zeros((len(uniqueImageID), totalBins))
+    #keep identifying data
+    idvals = np.empty((len(uniqueImageID), len(identitycols)), dtype='object')
     if param.textureFeatures:
         textureResults = np.zeros((len(uniqueImageID), 4))
     useTreatment=False
     if len(param.treatmentCol) > 0:
         useTreatment = True
         Treatments = []
-    timeupdates = len(uniqueImageID)//5
+    times = np.zeros(5)
+    meantime = 0
     for iImages in range(len(uniqueImageID)):
-        if (iImages == 1) or ((iImages > 3) and ((iImages+1) % timeupdates == 0)):
-            print(f'Remaining time estimate ... {round(timeperimage * (len(uniqueImageID)-iImages)/60, 2)} minutes')
-        if iImages == 0:
-            a = time.time()
+        a = time.time()
+        if iImages > 0 and iImages % 5 == 0:
+            if np.mean(times) > meantime:
+                meantime = np.mean(times)
+            estimate = f'Remaining time estimate ... {round(meantime * (len(uniqueImageID)-iImages)/60, 2)} minutes'
+            print(estimate, end='\r')
         id = uniqueImageID[iImages]
         tmpmdata = mData.loc[mData[param.imageIDCol[0]] == id]
         d = getImageInformation(tmpmdata , param.channelCol[0])
@@ -192,21 +197,26 @@ def extractImageLevelTextureFeatures(mData, param, outputFileName='imagefeatures
         imgProfile, rawProfile = getImageProfile(megaVoxelProfile, fgMegaVoxel, param)
         resultIM[iImages, :] = imgProfile
         resultRaw[iImages, :] = rawProfile
+        for i, col in enumerate(identitycols):
+            idvals[iImages, i] = tmpmdata[col].values[0]
         if param.textureFeatures: 
             textureResults[iImages, :] = texture_features
         if useTreatment:
-            Treatments.append(tmpmdata[param.treatmentCol].values[0])
-        if iImages == 0:
-            timeperimage = time.time() - a
+            Treatments.append(tmpmdata[param.treatmentCol].values[0][0])
+        b = time.time() - a
+        times[iImages % 5] = b
     print('Writing data to file ...')
     numRawMV = np.sum(resultRaw, axis=1) #one value per image, gives number of megavoxels
     dictResults = {
         'ImageID':uniqueImageID
     }
+
     if useTreatment:
         dictResults['Treatment'] = Treatments
     else:
         dictResults['Treatment'] = np.full((len(uniqueImageID), ), 'RR', dtype='object')
+    for i, col in enumerate(identitycols):
+        dictResults[col] = idvals[:, i]
     dictResults['NumMV'] = numRawMV
     for i in range(resultIM.shape[1]):
         mvlabel = f'MV{i+1}'
@@ -216,8 +226,6 @@ def extractImageLevelTextureFeatures(mData, param, outputFileName='imagefeatures
             dictResults[name] = textureResults[:, i]
     df = pd.DataFrame(dictResults)
     csv_name = outputFileName
-    if len(outputDir) > 0:
-        csv_name = outputDir + '\\' + csv_name
     if csv_name[-4:] != '.csv':
         csv_name = csv_name + '.csv'
     df.to_csv(csv_name) 
@@ -476,20 +484,20 @@ def getMegaVoxelProfile(tileProfile, fgSuperVoxel, param, analysis=False):
         param.numSuperVoxelZ = int(param.croppedZ/param.tileZ)
         total_mean_textures = np.full((param.numSuperVoxelZ, 4), np.nan)
         for i in range(sv_image.shape[0]):
-            texture_features = np.full((2, 13), np.nan)
+            texture_features = np.full(13, np.nan)
             try:
-                texture_features[0, :] = mt.features.haralick(sv_image[i, :, :], distance=1, ignore_zeros=True, return_mean=True)
+                texture_features[:] = mt.features.haralick(sv_image[i, :, :], distance=1, ignore_zeros=True, return_mean=True)
             except ValueError:
                 pass
-            try:
-                texture_features[1, :] = mt.features.haralick(sv_image[i, :, :], distance=2, ignore_zeros=True, return_mean=True)
-            except ValueError:
-                pass
-            texture_features = texture_features[:, [0, 8, 11, 12]]
-            texture_features = texture_features[~np.isnan(texture_features).any(axis=1), :]
-            if len(texture_features) > 1:
-                texture_features = np.mean(texture_features, axis=0)
-            if texture_features.size > 0:
+            # try:
+            #     texture_features[1, :] = mt.features.haralick(sv_image[i, :, :], distance=2, ignore_zeros=True, return_mean=True)
+            # except ValueError:
+            #     pass
+            texture_features = texture_features[[0, 8, 11, 12]]
+            # texture_features = texture_features[~np.isnan(texture_features).any(axis=1)]
+            # if len(texture_features) > 1:
+            #     texture_features = np.mean(texture_features, axis=0)
+            if np.isfinite(texture_features).all():
                 total_mean_textures[i, :] = texture_features
         total_mean_textures = total_mean_textures[~np.isnan(total_mean_textures).any(axis=1), :]
         textureFeatures = np.mean(total_mean_textures, axis=0)
@@ -698,6 +706,7 @@ def getScalingFactorforImages(metadata, param):
         #used to be a getTileInfo here.
         randHalf = int(depth//2 )
         randZ = [zStack[j] for j in Generator.choice(depth, size=randHalf, replace=False, shuffle=False)] #choose half of the stack, randomly
+        # print(randZ) ###############################################################################################################
         minVal = np.zeros((randHalf, param.numChannels))
         maxVal = np.zeros((randHalf, param.numChannels))
         for j in range(randHalf): 
@@ -1052,6 +1061,7 @@ def getTrainingFields(metadata, param):
             treatmentIDs = np.unique(metadata.loc[metadata[param.treatmentCol[0]] == treat, param.imageIDCol])  #all image IDs corresponding to this treatment
             randFieldID = randFieldID + [treatmentIDs[j] for j in Generator.choice(len(treatmentIDs), size=param.randTrainingPerTreatment, replace=False, shuffle=False)]
         randFieldID = np.array(randFieldID)
+    # print(randFieldID) #################################################
     return randFieldID 
 
 #   getTrainingPixels.m
