@@ -163,7 +163,7 @@ def im2col(img, blkShape):
 #functions that we seem to need (only start with calculation functions, no gui stuff).
 
 #   extractImageLevelTextureFeatures.m
-def extractImageLevelTextureFeatures(mData, param, identitycols, outputFileName='imagefeatures.csv'):
+def extractImageLevelTextureFeatures(mData, param, outputFileName='imagefeatures.csv'):
     if param.countBackground:
         totalBins = param.numMegaVoxelBins + 1
     else:
@@ -172,7 +172,8 @@ def extractImageLevelTextureFeatures(mData, param, identitycols, outputFileName=
     resultIM = np.zeros((len(uniqueImageID), totalBins)) #for all images: put megavoxel frequencies
     resultRaw = np.zeros((len(uniqueImageID), totalBins))
     #keep identifying data
-    idvals = np.empty((len(uniqueImageID), len(identitycols)), dtype='object')
+    mdatacols = mData.columns
+    mdatavals = np.empty((len(uniqueImageID), len(mdatacols)), dtype='object')
     if param.textureFeatures:
         textureResults = np.zeros((len(uniqueImageID), 4))
     useTreatment=False
@@ -183,13 +184,15 @@ def extractImageLevelTextureFeatures(mData, param, identitycols, outputFileName=
     meantime = 0
     for iImages in range(len(uniqueImageID)):
         a = time.time()
-        if iImages > 0 and iImages % 5 == 0:
+        if iImages > 4 and iImages % 2 == 0:
             if np.mean(times) > meantime:
                 meantime = np.mean(times)
             estimate = f'Remaining time estimate ... {round(meantime * (len(uniqueImageID)-iImages)/60, 2)} minutes'
             print(estimate, end='\r')
         id = uniqueImageID[iImages]
         tmpmdata = mData.loc[mData[param.imageIDCol[0]] == id]
+        for i, col in enumerate(mdatacols):
+            mdatavals[iImages, i] = tmpmdata[col].values[0]
         d = getImageInformation(tmpmdata , param.channelCol[0])
         param = getTileInfo(d, param)
         superVoxelProfile, fgSuperVoxel = getTileProfiles(tmpmdata, param.pixelBinCenters, param, analysis=True)
@@ -197,8 +200,6 @@ def extractImageLevelTextureFeatures(mData, param, identitycols, outputFileName=
         imgProfile, rawProfile = getImageProfile(megaVoxelProfile, fgMegaVoxel, param)
         resultIM[iImages, :] = imgProfile
         resultRaw[iImages, :] = rawProfile
-        for i, col in enumerate(identitycols):
-            idvals[iImages, i] = tmpmdata[col].values[0]
         if param.textureFeatures: 
             textureResults[iImages, :] = texture_features
         if useTreatment:
@@ -207,16 +208,13 @@ def extractImageLevelTextureFeatures(mData, param, identitycols, outputFileName=
         times[iImages % 5] = b
     print('Writing data to file ...')
     numRawMV = np.sum(resultRaw, axis=1) #one value per image, gives number of megavoxels
-    dictResults = {
-        'ImageID':uniqueImageID
-    }
-
+    dictResults = {}
+    for i, col in enumerate(mdatacols):
+        dictResults[col] = mdatavals[:, i]
     if useTreatment:
         dictResults['Treatment'] = Treatments
     else:
         dictResults['Treatment'] = np.full((len(uniqueImageID), ), 'RR', dtype='object')
-    for i, col in enumerate(identitycols):
-        dictResults[col] = idvals[:, i]
     dictResults['NumMV'] = numRawMV
     for i in range(resultIM.shape[1]):
         mvlabel = f'MV{i+1}'
@@ -226,9 +224,9 @@ def extractImageLevelTextureFeatures(mData, param, identitycols, outputFileName=
             dictResults[name] = textureResults[:, i]
     df = pd.DataFrame(dictResults)
     csv_name = outputFileName
-    if csv_name[-4:] != '.csv':
-        csv_name = csv_name + '.csv'
-    df.to_csv(csv_name) 
+    if csv_name[-4:] != '.txt':
+        csv_name = csv_name + '.txt'
+    df.to_csv(csv_name, index=None, sep='\t') 
     print('\nAll done.')
     return param, resultIM, resultRaw, df #, metaIndexTmp
 
