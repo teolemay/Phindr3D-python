@@ -246,7 +246,7 @@ def apcluster(s, p, sparse=False, maxits=500, convits=50, dampfact=0.5, plot=Fal
             AS[k, I[k]] = -realmax
         Y2 = np.amax(AS, axis=1)
         I2 = np.argmax(AS, axis=1)
-        R = S-np.tile(Y, [N, 1])
+        R = S-np.transpose(np.tile(Y, [N, 1]))
         for k in range(N):
             R[k, I[k]] = S[k, I[k]] - Y2[k]
         #damping
@@ -315,8 +315,7 @@ def apcluster(s, p, sparse=False, maxits=500, convits=50, dampfact=0.5, plot=Fal
         #refine the final set of exemplars and clusters and return results
         for k in range(K):
             ii = np.nonzero(c==k)[0] 
-            # y = np.max(np.sum(S[ii, ii], axis=0))
-            j = np.argmax(np.sum(S[ii, ii], axis=0))
+            j = np.argmax(np.sum(S[np.ix_(ii, ii)], axis=0))
             I[k] = ii[j]
         tmp = np.amax(S[:, I], axis=1)
         c = np.argmax(S[:, I], axis=1)
